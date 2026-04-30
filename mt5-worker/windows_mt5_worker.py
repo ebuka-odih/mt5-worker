@@ -1,64 +1,156 @@
-"""Windows MT5 worker template.
+"""
+Windows MT5 worker template.
 
 Run this on the Windows machine that has MetaTrader 5 installed and logged in.
 The worker makes OUTBOUND requests to the VPS, so no inbound Windows port is needed.
 
 Install on Windows:
-    py -m venv venv
-    venv\Scripts\activate
-    pip install MetaTrader5 requests python-dotenv
+ py -m venv venv
+ venv\\Scripts\\activate
+ pip install -r requirements.txt
 
-Create .env next to this file:
-    VPS_API_BASE=https://your-vps-domain-or-ip:8780
-    WORKER_TOKEN=CHANGE_ME_LONG_RANDOM_TOKEN
-    WORKER_ID=windows-mt5-local-01
-    DRY_RUN=true
+Create .env next to this file (copy from .env.example and fill in values):
+ cp .env.example .env
+ # Edit .env with your VPS_API_BASE and a strong WORKER_TOKEN
 
 Then run:
-    python windows_mt5_worker.py
+ python windows_mt5_worker.py
+
+For testing without a real VPS, set:
+ DRY_RUN=true
 """
 
 from __future__ import annotations
 
+import logging
 import os
+import signal
+import sys
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 import requests
 from dotenv import load_dotenv
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("mt5-worker")
+
 try:
     import MetaTrader5 as mt5
-except ImportError:  # lets the file be linted on non-Windows machines
+except ImportError:  # allows the file to be linted on non-Windows machines
     mt5 = None
 
 load_dotenv()
 
 API_BASE = os.getenv("VPS_API_BASE", "http://127.0.0.1:8780").rstrip("/")
-TOKEN = os.getenv("WORKER_TOKEN", "CHANGE_ME_LONG_RANDOM_TOKEN")
+TOKEN = os.getenv("WORKER_TOKEN", "")  # Must be set - no default!
 WORKER_ID = os.getenv("WORKER_ID", "windows-mt5-local-01")
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 POLL_SECONDS = float(os.getenv("POLL_SECONDS", "1"))
 MAGIC = int(os.getenv("MT5_MAGIC", "552501"))
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
+RETRY_DELAY = float(os.getenv("RETRY_DELAY", "2"))
+
+if not TOKEN:
+    logger.error("WORKER_TOKEN is not set in .env file. Please set a strong random token.")
+    sys.exit(1)
 
 HEADERS = {"X-Worker-Token": TOKEN}
 
+# Graceful shutdown flag
+_shutdown_requested = False
 
-def mt5_init() -> bool:
-    if mt5 is None:
-        print("MetaTrader5 package not installed. Run: pip install MetaTrader5")
-        return False
-    ok = mt5.initialize()
-    if not ok:
-        print("MT5 initialize failed:", mt5.last_error())
-    return ok
+
+def _signal_handler(signum, frame) -> None:
+    """Handle Ctrl+C or termination signals gracefully."""
+    global _shutdown_requested
+    logger.info("Shutdown signal received, cleaning up...")
+    _shutdown_requested = True
+
+
+# Register signal handlers
+signal.signal(signal.SIGINT, _signal_handler)
+signal.signal(signal.SIGTERM, _signal_handler)
+
+
+def retry_request(func, *args, max_attempts: int = MAX_RETRIES, **kwargs) -> Any:
+    """Retry a request function with exponential backoff for transient failures."""
+    last_exception = None
+    for attempt in range(max_attempts):
+        try:
+            return func(*args, **kwargs)
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+            if attempt < max_attempts - 1:
+                wait_time = RETRY_DELAY * (2 ** attempt)
+                logger.warning(f"Request failed (attempt {attempt + 1}/{max_attempts}): {e}. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+    logger.error(f"Request failed after {max_attempts} attempts: {last_exception}")
+    raise last_exception
+
+
+@dataclass
+class MT5State:
+    """Track MT5 connection state to avoid repeated initialize() calls."""
+    initialized: bool = False
+    account_login: Optional[int] = None
+    broker: Optional[str] = None
+    balance: Optional[float] = None
+    equity: Optional[float] = None
+    last_init_time: float = 0.0
+
+    def ensure_initialized(self) -> bool:
+        """Ensure MT5 is initialized, reinitializing only if needed."""
+        global _shutdown_requested
+        if _shutdown_requested:
+            return False
+
+        # Re-initialize if not done or if it's been > 5 minutes
+        now = time.time()
+        if self.initialized and (now - self.last_init_time) < 300:
+            return True
+
+        if mt5 is None:
+            logger.warning("MetaTrader5 package not installed")
+            self.initialized = False
+            return False
+
+        if not self.initialized:
+            logger.info("Initializing MT5 connection...")
+            ok = mt5.initialize()
+            if not ok:
+                logger.error(f"MT5 initialize failed: {mt5.last_error()}")
+                self.initialized = False
+                return False
+            self.initialized = True
+            self.last_init_time = now
+            logger.info("MT5 initialized successfully")
+
+        return True
+
+    def shutdown(self) -> None:
+        """Cleanly shutdown MT5 connection."""
+        if mt5 and self.initialized:
+            logger.info("Shutting down MT5 connection...")
+            mt5.shutdown()
+            self.initialized = False
+
+
+# Global MT5 state
+_mt5_state = MT5State()
 
 
 def send_heartbeat() -> None:
-    if mt5 is None or not mt5.initialize():
-        payload = {"worker_id": WORKER_ID, "mt5_connected": False, "open_positions": 0}
-    else:
+    """Send heartbeat to VPS with current worker status."""
+    global _mt5_state
+
+    if _mt5_state.ensure_initialized():
         account = mt5.account_info()
         positions = mt5.positions_get() or []
         payload = {
@@ -69,50 +161,108 @@ def send_heartbeat() -> None:
             "balance": getattr(account, "balance", None),
             "equity": getattr(account, "equity", None),
             "open_positions": len(positions),
+            "dry_run": DRY_RUN,
         }
-    requests.post(f"{API_BASE}/api/worker/heartbeat", json=payload, headers=HEADERS, timeout=10)
+    else:
+        payload = {
+            "worker_id": WORKER_ID,
+            "mt5_connected": False,
+            "open_positions": 0,
+            "dry_run": DRY_RUN,
+        }
+
+    def _send():
+        resp = requests.post(
+            f"{API_BASE}/api/worker/heartbeat",
+            json=payload,
+            headers=HEADERS,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp
+
+    try:
+        retry_request(_send)
+        logger.debug(f"Heartbeat sent: positions={payload['open_positions']}, mt5={payload['mt5_connected']}")
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Heartbeat failed: {e}")
 
 
-def get_next_signal() -> dict[str, Any] | None:
-    resp = requests.get(
-        f"{API_BASE}/api/worker/next-signal",
-        params={"worker_id": WORKER_ID},
-        headers=HEADERS,
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return resp.json()
+def get_next_signal() -> Optional[dict[str, Any]]:
+    """Poll VPS for next pending signal."""
+    def _get():
+        resp = requests.get(
+            f"{API_BASE}/api/worker/next-signal",
+            params={"worker_id": WORKER_ID},
+            headers=HEADERS,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    try:
+        signal_data = retry_request(_get)
+        if signal_data:
+            logger.info(f"Received signal: id={signal_data.get('id')}, symbol={signal_data.get('symbol')}, side={signal_data.get('side')}")
+        return signal_data
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Signal poll failed: {e}")
+        return None
 
 
 def report(signal_id: str, status: str, message: str, **extra: Any) -> None:
+    """Report execution status back to VPS."""
     payload = {
         "signal_id": signal_id,
         "worker_id": WORKER_ID,
         "status": status,
         "message": message,
+        "dry_run": DRY_RUN,
         **extra,
     }
-    requests.post(f"{API_BASE}/api/worker/execution-report", json=payload, headers=HEADERS, timeout=10)
+
+    def _report():
+        resp = requests.post(
+            f"{API_BASE}/api/worker/execution-report",
+            json=payload,
+            headers=HEADERS,
+            timeout=10,
+        )
+        resp.raise_for_status()
+
+    try:
+        retry_request(_report)
+        logger.info(f"Reported signal {signal_id}: status={status}, message={message}")
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Failed to report signal {signal_id}: {e} (status={status}, message={message})")
 
 
 def execute_signal(signal: dict[str, Any]) -> None:
-    print("Received signal:", signal)
+    """Execute a trading signal on MT5."""
+    global _mt5_state
+
+    signal_id = signal.get("id", "unknown")
+    logger.info(f"Executing signal: {signal}")
+
     if DRY_RUN:
-        report(signal["id"], "filled", "DRY_RUN accepted signal; no MT5 order sent", lots=signal.get("lots"))
+        # Dry-run mode: accept signal but don't place real order
+        logger.info(f"[DRY_RUN] Would execute signal {signal_id}: {signal.get('side').upper()} {signal.get('lots')} {signal.get('symbol')}")
+        report(signal_id, "filled", "DRY_RUN accepted signal; no MT5 order sent", lots=signal.get("lots"))
         return
 
-    if mt5 is None or not mt5.initialize():
-        report(signal["id"], "rejected", "MT5 not connected")
+    if not _mt5_state.ensure_initialized():
+        report(signal_id, "rejected", "MT5 not connected or initialization failed")
         return
 
     symbol = signal["symbol"]
     if not mt5.symbol_select(symbol, True):
-        report(signal["id"], "rejected", f"symbol_select failed for {symbol}: {mt5.last_error()}")
+        error = mt5.last_error()
+        report(signal_id, "rejected", f"symbol_select failed for {symbol}: {error}")
         return
 
     tick = mt5.symbol_info_tick(symbol)
     if tick is None:
-        report(signal["id"], "rejected", f"no tick for {symbol}")
+        report(signal_id, "rejected", f"no tick for {symbol}")
         return
 
     side = signal["side"].lower()
@@ -133,34 +283,66 @@ def execute_signal(signal: dict[str, Any]) -> None:
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_IOC,
     }
+
     result = mt5.order_send(request)
     if result is None:
-        report(signal["id"], "rejected", f"order_send returned None: {mt5.last_error()}")
+        report(signal_id, "rejected", f"order_send returned None: {mt5.last_error()}")
         return
+
     if result.retcode != mt5.TRADE_RETCODE_DONE:
-        report(signal["id"], "rejected", f"MT5 retcode={result.retcode}, comment={result.comment}")
+        report(signal_id, "rejected", f"MT5 retcode={result.retcode}, comment={result.comment}")
         return
-    report(signal["id"], "filled", "MT5 order filled", broker_order_id=str(result.order), executed_price=price, lots=float(signal["lots"]))
+
+    logger.info(f"Order filled: {signal_id} -> order_id={result.order}, price={price}")
+    report(signal_id, "filled", "MT5 order filled", broker_order_id=str(result.order), executed_price=price, lots=float(signal["lots"]))
 
 
 def main() -> None:
-    print(f"Starting Windows MT5 worker {WORKER_ID}; dry_run={DRY_RUN}; api={API_BASE}")
+    """Main worker loop."""
+    global _mt5_state, _shutdown_requested
+
+    logger.info(f"Starting Windows MT5 worker")
+    logger.info(f"  Worker ID: {WORKER_ID}")
+    logger.info(f"  VPS API:   {API_BASE}")
+    logger.info(f"  Dry Run:   {DRY_RUN}")
+    logger.info(f"  Poll Interval: {POLL_SECONDS}s")
+
+    # Initial MT5 check
+    if _mt5_state.ensure_initialized():
+        account = mt5.account_info()
+        logger.info(f"MT5 connected: login={getattr(account, 'login', 'N/A')}, server={getattr(account, 'server', 'N/A')}, balance={getattr(account, 'balance', 'N/A')}")
+
     last_hb = 0.0
-    while True:
+
+    while not _shutdown_requested:
         now = time.time()
+
+        # Send heartbeat every 10 seconds
         if now - last_hb > 10:
             try:
                 send_heartbeat()
+                last_hb = now
             except Exception as exc:
-                print("heartbeat failed:", exc)
-            last_hb = now
+                logger.error(f"Heartbeat error: {exc}")
+
+        # Poll for signals
         try:
             signal = get_next_signal()
             if signal:
                 execute_signal(signal)
         except Exception as exc:
-            print("poll failed:", exc)
-        time.sleep(POLL_SECONDS)
+            logger.error(f"Signal processing error: {exc}")
+
+        # Sleep in small increments to respond to shutdown faster
+        for _ in range(int(POLL_SECONDS * 10)):
+            if _shutdown_requested:
+                break
+            time.sleep(0.1)
+
+    # Cleanup
+    logger.info("Worker shutting down...")
+    _mt5_state.shutdown()
+    logger.info("Worker stopped")
 
 
 if __name__ == "__main__":

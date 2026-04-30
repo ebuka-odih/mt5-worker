@@ -6,7 +6,7 @@ app:
 api:
   host: 0.0.0.0
   port: 8780
-  worker_token: CHANGE_ME_LONG_RANDOM_TOKEN
+  worker_token: 991403c231352264deb0d3e949324189eff63f08ede89901d0dc22a3e152a693
 
 market_data:
   provider: bybit
