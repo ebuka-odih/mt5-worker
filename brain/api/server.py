@@ -3,14 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Dict, List
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Body, Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from brain.data.bybit_data import BybitMarketDataProvider, BybitWebhookCache
 from brain.data.forex_data import YFinanceForexProvider
 from brain.signals.grid_strike import GridPlan, GridStrikeCandidate, build_grid_plan, scan_grid_candidates
 from brain.signals.simple_strategy import simple_signal
-from shared.models import ExecutionReport, ForexQuote, Signal, SignalStatus, WorkerHeartbeat
+from shared.models import ExecutionReport, ForexQuote, Signal, SignalSide, SignalStatus, WorkerHeartbeat
 from shared.settings import load_settings
 
 settings = load_settings()
@@ -29,6 +29,14 @@ bybit_webhook_cache = BybitWebhookCache()
 SIGNALS: Dict[str, Signal] = {}
 EXECUTIONS: List[ExecutionReport] = []
 HEARTBEATS: Dict[str, WorkerHeartbeat] = {}
+
+
+class CreateSignalRequest(BaseModel):
+    symbol: str
+    side: str = "buy"
+    lots: float = 0.01
+    stop_loss: float | None = None
+    take_profit: float | None = None
 
 
 class BybitWebhookPayload(BaseModel):
@@ -129,6 +137,22 @@ def grid_strike_plan() -> GridPlan | None:
     return build_grid_plan(best, mid_price=best.mid_price, settings=settings.grid_strike)
 
 
+@app.post("/api/signals/create", response_model=Signal)
+def create_signal_from_grid(req: CreateSignalRequest = Body(...)) -> Signal:
+    """Create a signal directly (for testing or manual trading)."""
+    signal = Signal(
+        symbol=req.symbol,
+        side=SignalSide(req.side.lower()),
+        lots=req.lots,
+        stop_loss=req.stop_loss,
+        take_profit=req.take_profit,
+        confidence=0.95,
+        reason="manual-create",
+    )
+    SIGNALS[signal.id] = signal
+    return signal
+
+
 @app.get("/api/signals", response_model=list[Signal])
 def list_signals() -> list[Signal]:
     return list(SIGNALS.values())
@@ -158,3 +182,26 @@ def execution_report(report: ExecutionReport, _: None = Depends(require_worker_t
 def heartbeat(hb: WorkerHeartbeat, _: None = Depends(require_worker_token)) -> dict:
     HEARTBEATS[hb.worker_id] = hb
     return {"ok": True, "server_time": datetime.now(timezone.utc).isoformat()}
+
+
+@app.post("/api/worker/test-signal")
+def create_test_signal(
+    symbol: str,
+    side: str,
+    lots: float,
+    worker_id: str = "test-worker",
+    stop_loss: float | None = None,
+    take_profit: float | None = None,
+) -> Signal:
+    """Create a test signal for worker verification."""
+    signal = Signal(
+        symbol=symbol,
+        side=SignalSide(side.lower()),
+        lots=lots,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        confidence=0.95,
+        reason="test-signal",
+    )
+    SIGNALS[signal.id] = signal
+    return signal
