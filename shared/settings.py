@@ -1,0 +1,90 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import yaml
+from pydantic import BaseModel, Field
+
+
+class ApiSettings(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8780
+    worker_token: str = "CHANGE_ME_LONG_RANDOM_TOKEN"
+
+
+class MarketDataSettings(BaseModel):
+    provider: str = "yfinance"
+    refresh_seconds: int = 60
+    candles_interval: str = "15m"
+    candles_period: str = "5d"
+    symbols: list[str] = Field(default_factory=lambda: ["EURUSD", "GBPUSD", "USDJPY"])
+
+
+class RiskSettings(BaseModel):
+    account_currency: str = "USD"
+    starting_balance: float = 10_000
+    max_risk_per_trade_pct: float = 0.5
+    max_daily_loss_pct: float = 2.0
+    max_total_drawdown_pct: float = 20.0
+    funded_challenge_mode: bool = False
+    challenge_min_days: int = 30
+    challenge_max_days: int = 60
+    max_open_positions: int = 3
+    max_positions_per_symbol: int = 1
+    default_stop_loss_pips: float = 20
+    default_take_profit_pips: float = 30
+    min_rr: float = 1.2
+
+
+class StrategySettings(BaseModel):
+    enabled: bool = True
+    min_signal_confidence: float = 0.65
+    trend_fast_ema: int = 20
+    trend_slow_ema: int = 50
+    rsi_period: int = 14
+    rsi_buy_below: float = 35
+    rsi_sell_above: float = 65
+
+
+class GridStrikeSettings(BaseModel):
+    enabled: bool = True
+    min_score: float = 0.55
+    min_range_pct: float = 0.05
+    max_range_pct: float = 1.20
+    max_trend_ratio: float = 0.65
+    lookback_candles: int = 96
+    levels_each_side: int = 5
+    min_spacing_pips: float = 3.0
+    max_spacing_pips: float = 25.0
+    order_lots: float = 0.01
+
+
+class Mt5WorkerSettings(BaseModel):
+    poll_seconds: int = 1
+    heartbeat_seconds: int = 10
+    allowed_order_types: list[str] = Field(default_factory=lambda: ["market", "limit"])
+    magic_number: int = 552501
+    comment_prefix: str = "vps_forex_brain"
+
+
+class AppSection(BaseModel):
+    name: str = "forex-mt5-bot"
+    mode: str = "paper"
+    timezone: str = "UTC"
+
+
+class Settings(BaseModel):
+    app: AppSection = Field(default_factory=AppSection)
+    api: ApiSettings = Field(default_factory=ApiSettings)
+    market_data: MarketDataSettings = Field(default_factory=MarketDataSettings)
+    risk: RiskSettings = Field(default_factory=RiskSettings)
+    strategy: StrategySettings = Field(default_factory=StrategySettings)
+    grid_strike: GridStrikeSettings = Field(default_factory=GridStrikeSettings)
+    mt5_worker: Mt5WorkerSettings = Field(default_factory=Mt5WorkerSettings)
+
+
+def load_settings(path: str | Path = "config/settings.yaml") -> Settings:
+    path = Path(path)
+    raw: dict[str, Any] = yaml.safe_load(path.read_text()) if path.exists() else {}
+    return Settings.model_validate(raw)

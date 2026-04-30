@@ -1,0 +1,63 @@
+app:
+  name: forex-mt5-bot
+  mode: paper          # paper | demo | live
+  timezone: UTC
+
+api:
+  host: 0.0.0.0
+  port: 8780
+  worker_token: CHANGE_ME_LONG_RANDOM_TOKEN
+
+market_data:
+  provider: bybit
+  refresh_seconds: 60
+  candles_interval: 1h
+  candles_period: 30d
+  symbols:
+    - BTCUSD
+    - ETHUSD
+
+risk:
+  account_currency: USD
+  starting_balance: 10000
+  max_risk_per_trade_pct: 2.0
+  max_daily_loss_pct: 2.0
+  max_total_drawdown_pct: 20.0
+  funded_challenge_mode: true
+  challenge_min_days: 30
+  challenge_max_days: 60
+  max_open_positions: 1
+  max_positions_per_symbol: 1
+  default_stop_loss_pips: 20
+  default_take_profit_pips: 30
+  min_rr: 1.2
+
+strategy:
+  enabled: true
+  min_signal_confidence: 0.65
+  trend_fast_ema: 20
+  trend_slow_ema: 50
+  rsi_period: 14
+  rsi_buy_below: 35
+  rsi_sell_above: 65
+
+grid_strike:
+  enabled: true
+  min_score: 0.55
+  min_range_pct: 5.00
+  max_range_pct: 35.00
+  max_trend_ratio: 0.75
+  lookback_candles: 720
+  levels_each_side: 500
+  min_spacing_pips: 10.0
+  max_spacing_pips: 100.0
+  order_lots: 0.01
+
+mt5_worker:
+  poll_seconds: 1
+  heartbeat_seconds: 10
+  allowed_order_types:
+    - market
+    - limit
+  magic_number: 552501
+  comment_prefix: vps_forex_brain
