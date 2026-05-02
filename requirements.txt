@@ -1,0 +1,9 @@
+# Forex MT5 Bot — Brain (VPS side)
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+pydantic==2.9.0
+requests==2.32.0
+pandas==2.2.0
+yfinance==0.2.40
+python-dotenv==1.0.0
+pyyaml==6.0.2
