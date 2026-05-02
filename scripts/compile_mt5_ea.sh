@@ -38,9 +38,9 @@ if [[ -d "$ROOT_DIR/.venv" ]]; then
 fi
 
 PYTHONPATH="$ROOT_DIR" python "$ROOT_DIR/scripts/sync_mt5_config.py"
+PYTHONPATH="$ROOT_DIR" python "$ROOT_DIR/scripts/render_mt5_ea.py"
 
 mkdir -p "$EXPERTS_DIR_UNIX" "$FILES_DIR_UNIX" "$LOG_DIR_UNIX"
-cp "$SOURCE_MQ5" "$TARGET_MQ5_UNIX"
 cp "$SOURCE_ENV" "$FILES_DIR_UNIX/mt5-worker.env"
 
 TARGET_MQ5_WIN="$(to_wine_path "$TARGET_MQ5_UNIX")"
