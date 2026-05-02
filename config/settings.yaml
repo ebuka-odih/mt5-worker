@@ -1,6 +1,6 @@
 app:
   name: forex-mt5-bot
-  mode: live           # paper | demo | live
+  mode: live
   timezone: UTC
 
 api:
@@ -47,7 +47,7 @@ strategy:
   rsi_buy_below: 35
   rsi_sell_above: 65
   trend_guard_bars: 6
-  trend_guard_pct: 99.0    # Off — wide grid handles this
+  trend_guard_pct: 2.0
   max_new_orders_per_bar: 4
 
 grid_strike:
@@ -64,14 +64,16 @@ grid_strike:
   take_profit_spacing: 1000.0
   stop_loss_spacing: 500.0
   order_lots: 0.01
+  symbol_lots:
+    BTCUSD: 0.01
+    ETHUSD: 0.10
+    SOLUSD: 0.10
+    XRPUSD: 1.00
 
 basket_profit_lock:
   enabled: true
-  # When portfolio unrealized PnL drops below this % of peak, flatten all
   trail_pct: 30.0
-  # Minimum realized PnL to activate the lock (prevents premature flattening)
   activation_threshold: 500.0
-  # Cooldown hours after a flatten before new positions allowed
   cooldown_hours: 4
 
 mt5_worker:

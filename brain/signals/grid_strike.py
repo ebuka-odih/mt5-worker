@@ -153,12 +153,13 @@ def build_grid_plan(
     pip = pip_size(candidate.symbol)
     step = candidate.grid_spacing_pips * pip
 
+    lots = settings.get_lots(candidate.symbol)
     buy_levels = [
-        GridLevel(index=i, side="buy", price=_round_price(candidate.symbol, mid - (step * i)), lots=settings.order_lots)
+        GridLevel(index=i, side="buy", price=_round_price(candidate.symbol, mid - (step * i)), lots=lots)
         for i in range(1, settings.levels_each_side + 1)
     ]
     sell_levels = [
-        GridLevel(index=i, side="sell", price=_round_price(candidate.symbol, mid + (step * i)), lots=settings.order_lots)
+        GridLevel(index=i, side="sell", price=_round_price(candidate.symbol, mid + (step * i)), lots=lots)
         for i in range(1, settings.levels_each_side + 1)
     ]
 
@@ -169,7 +170,7 @@ def build_grid_plan(
         lower_bound=buy_levels[-1].price,
         upper_bound=sell_levels[-1].price,
         grid_spacing_pips=candidate.grid_spacing_pips,
-        lots_per_level=settings.order_lots,
+        lots_per_level=lots,
         buy_levels=buy_levels,
         sell_levels=sell_levels,
         reason=candidate.reason,

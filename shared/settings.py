@@ -68,6 +68,11 @@ class GridStrikeSettings(BaseModel):
     grid_spacing: float = 120.0
     take_profit_spacing: float = 120.0
     stop_loss_spacing: float = 60.0
+    symbol_lots: dict[str, float] = Field(default_factory=dict)
+
+    def get_lots(self, symbol: str) -> float:
+        """Return per-symbol lot size, falling back to order_lots."""
+        return self.symbol_lots.get(symbol.upper(), self.order_lots)
 
 
 class BasketProfitLockSettings(BaseModel):
