@@ -1,6 +1,6 @@
 app:
   name: forex-mt5-bot
-  mode: paper          # paper | demo | live
+  mode: live           # paper | demo | live
   timezone: UTC
 
 api:
@@ -16,21 +16,27 @@ market_data:
   symbols:
     - BTCUSD
     - ETHUSD
+    - SOLUSD
+    - XRPUSD
 
 risk:
   account_currency: USD
-  starting_balance: 10000
-  max_risk_per_trade_pct: 2.0
-  max_daily_loss_pct: 2.0
-  max_total_drawdown_pct: 20.0
+  starting_balance: 400000
+  max_risk_per_trade_pct: 0.44
+  max_daily_loss_pct: 1.0
+  max_total_drawdown_pct: 4.0
   funded_challenge_mode: true
   challenge_min_days: 30
   challenge_max_days: 60
-  max_open_positions: 1
-  max_positions_per_symbol: 1
-  default_stop_loss_pips: 20
-  default_take_profit_pips: 30
-  min_rr: 1.2
+  max_open_positions: 50
+  max_positions_per_symbol: 50
+  default_stop_loss_pips: 500
+  default_take_profit_pips: 1000
+  min_rr: 2.0
+  risk_per_order: 1750.0
+  daily_loss_budget: 4000.0
+  leverage: 10.0
+  max_margin_usage_pct: 60.0
 
 strategy:
   enabled: true
@@ -40,18 +46,33 @@ strategy:
   rsi_period: 14
   rsi_buy_below: 35
   rsi_sell_above: 65
+  trend_guard_bars: 6
+  trend_guard_pct: 99.0    # Off — wide grid handles this
+  max_new_orders_per_bar: 4
 
 grid_strike:
   enabled: true
   min_score: 0.55
-  min_range_pct: 5.00
-  max_range_pct: 35.00
+  min_range_pct: 1.00
+  max_range_pct: 8.00
   max_trend_ratio: 0.75
   lookback_candles: 720
   levels_each_side: 500
-  min_spacing_pips: 10.0
-  max_spacing_pips: 100.0
+  min_spacing_pips: 300.0
+  max_spacing_pips: 700.0
+  grid_spacing: 500.0
+  take_profit_spacing: 1000.0
+  stop_loss_spacing: 500.0
   order_lots: 0.01
+
+basket_profit_lock:
+  enabled: true
+  # When portfolio unrealized PnL drops below this % of peak, flatten all
+  trail_pct: 30.0
+  # Minimum realized PnL to activate the lock (prevents premature flattening)
+  activation_threshold: 500.0
+  # Cooldown hours after a flatten before new positions allowed
+  cooldown_hours: 4
 
 mt5_worker:
   poll_seconds: 1

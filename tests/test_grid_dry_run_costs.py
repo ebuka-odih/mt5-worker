@@ -16,8 +16,8 @@ def test_simulator_order_costs_reduce_net_result() -> None:
         },
         index=pd.date_range("2026-01-01", periods=2, freq="h", tz="UTC"),
     )
-    no_cost = run_grid_simulation(df, GridSimulationConfig(round_trip_cost_per_order=0, max_new_orders_per_bar=2))
-    with_cost = run_grid_simulation(df, GridSimulationConfig(round_trip_cost_per_order=2, max_new_orders_per_bar=2))
+    no_cost = run_grid_simulation(df, GridSimulationConfig(round_trip_cost_per_order=0, max_new_orders_per_bar=2, grid_spacing=30, take_profit_spacing=30, stop_loss_spacing=15))
+    with_cost = run_grid_simulation(df, GridSimulationConfig(round_trip_cost_per_order=2, max_new_orders_per_bar=2, grid_spacing=30, take_profit_spacing=30, stop_loss_spacing=15))
 
     assert with_cost.balance < no_cost.balance
 

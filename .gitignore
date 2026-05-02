@@ -11,3 +11,12 @@ __pycache__/
 htmlcov/
 *.log
 .DS_Store
+
+# Trade data (local only)
+data/
+__pycache__/
+
+# One-off sweep/analysis scripts
+config_sweep.py
+final_sweep.py
+focused_sweep.py

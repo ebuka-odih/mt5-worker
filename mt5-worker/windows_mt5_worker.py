@@ -49,7 +49,7 @@ except ImportError:  # allows the file to be linted on non-Windows machines
 load_dotenv()
 
 API_BASE = os.getenv("VPS_API_BASE", "http://127.0.0.1:8780").rstrip("/")
-TOKEN = os.getenv("WORKER_TOKEN", "")  # Must be set - no default!
+TOKEN = os.getenv("WORKER_TOKEN", "")
 WORKER_ID = os.getenv("WORKER_ID", "windows-mt5-local-01")
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 POLL_SECONDS = float(os.getenv("POLL_SECONDS", "1"))
