@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel
+from starlette.responses import PlainTextResponse
 
 from brain.data.bybit_data import BybitMarketDataProvider, BybitWebhookCache
 from brain.data.forex_data import YFinanceForexProvider
@@ -35,23 +36,26 @@ class CreateSignalRequest(BaseModel):
     symbol: str
     side: str = "buy"
     lots: float = 0.01
-    stop_loss: float | None = None
-    take_profit: float | None = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
 
 
 class BybitWebhookPayload(BaseModel):
     symbol: str = "BTCUSD"
     price: float
-    bid: float | None = None
-    ask: float | None = None
-    timestamp: datetime | None = None
+    bid: Optional[float] = None
+    ask: Optional[float] = None
+    timestamp: Optional[datetime] = None
 
 
-def require_worker_token(x_worker_token: str = Header(default="")) -> None:
+def require_worker_token(
+    x_worker_token: str = Header(default=""),
+    worker_token: str = Query(default=""),
+) -> None:
     if settings.api.worker_token == "CHANGE_ME_LONG_RANDOM_TOKEN":
         # Allow local testing until token is changed.
         return
-    if x_worker_token != settings.api.worker_token:
+    if x_worker_token != settings.api.worker_token and worker_token != settings.api.worker_token:
         raise HTTPException(status_code=401, detail="invalid worker token")
 
 
@@ -127,8 +131,8 @@ def grid_strike_scan() -> list[GridStrikeCandidate]:
     return scan_grid_candidates(_load_grid_strike_candles(), settings.grid_strike)
 
 
-@app.post("/api/grid-strike/plan", response_model=GridPlan | None)
-def grid_strike_plan() -> GridPlan | None:
+@app.post("/api/grid-strike/plan", response_model=Optional[GridPlan])
+def grid_strike_plan() -> Optional[GridPlan]:
     """Build a buy/sell strike grid for the best currently tradeable pair."""
     candidates = grid_strike_scan()
     if not candidates:
@@ -158,8 +162,7 @@ def list_signals() -> list[Signal]:
     return list(SIGNALS.values())
 
 
-@app.get("/api/worker/next-signal", response_model=Signal | None)
-def next_signal(worker_id: str, _: None = Depends(require_worker_token)) -> Signal | None:
+def _claim_next_signal(worker_id: str) -> Optional[Signal]:
     for signal in SIGNALS.values():
         if signal.status == SignalStatus.CREATED:
             signal.status = SignalStatus.CLAIMED
@@ -167,6 +170,30 @@ def next_signal(worker_id: str, _: None = Depends(require_worker_token)) -> Sign
             signal.claimed_at = datetime.now(timezone.utc)
             return signal
     return None
+
+
+@app.get("/api/worker/next-signal", response_model=Optional[Signal])
+def next_signal(worker_id: str, _: None = Depends(require_worker_token)) -> Optional[Signal]:
+    return _claim_next_signal(worker_id)
+
+
+@app.get("/api/worker/next-signal-plain", response_class=PlainTextResponse)
+def next_signal_plain(worker_id: str, _: None = Depends(require_worker_token)) -> str:
+    signal = _claim_next_signal(worker_id)
+    if signal is None:
+        return ""
+    stop_loss = "" if signal.stop_loss is None else str(signal.stop_loss)
+    take_profit = "" if signal.take_profit is None else str(signal.take_profit)
+    return "|".join(
+        [
+            signal.id,
+            signal.symbol,
+            signal.side.value,
+            str(signal.lots),
+            stop_loss,
+            take_profit,
+        ]
+    )
 
 
 @app.post("/api/worker/execution-report")
@@ -184,14 +211,64 @@ def heartbeat(hb: WorkerHeartbeat, _: None = Depends(require_worker_token)) -> d
     return {"ok": True, "server_time": datetime.now(timezone.utc).isoformat()}
 
 
+@app.get("/api/worker/heartbeat-ping", response_class=PlainTextResponse)
+def heartbeat_ping(
+    worker_id: str,
+    mt5_connected: bool,
+    account_login: Optional[int] = None,
+    broker: Optional[str] = None,
+    balance: Optional[float] = None,
+    equity: Optional[float] = None,
+    open_positions: int = 0,
+    _: None = Depends(require_worker_token),
+) -> str:
+    HEARTBEATS[worker_id] = WorkerHeartbeat(
+        worker_id=worker_id,
+        mt5_connected=mt5_connected,
+        account_login=account_login,
+        broker=broker,
+        balance=balance,
+        equity=equity,
+        open_positions=open_positions,
+    )
+    return "ok"
+
+
+@app.get("/api/worker/execution-report-ping", response_class=PlainTextResponse)
+def execution_report_ping(
+    signal_id: str,
+    worker_id: str,
+    status: SignalStatus,
+    broker_order_id: Optional[str] = None,
+    executed_price: Optional[float] = None,
+    lots: Optional[float] = None,
+    message: str = "",
+    _: None = Depends(require_worker_token),
+) -> str:
+    report = ExecutionReport(
+        signal_id=signal_id,
+        worker_id=worker_id,
+        status=status,
+        broker_order_id=broker_order_id,
+        executed_price=executed_price,
+        lots=lots,
+        message=message,
+    )
+    EXECUTIONS.append(report)
+    signal = SIGNALS.get(report.signal_id)
+    if signal:
+        signal.status = report.status
+    return "ok"
+
+
 @app.post("/api/worker/test-signal")
 def create_test_signal(
     symbol: str,
     side: str,
     lots: float,
     worker_id: str = "test-worker",
-    stop_loss: float | None = None,
-    take_profit: float | None = None,
+    stop_loss: Optional[float] = None,
+    take_profit: Optional[float] = None,
 ) -> Signal:
     """Create a test signal for worker verification."""
     signal = Signal(
