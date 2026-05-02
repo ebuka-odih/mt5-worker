@@ -35,6 +35,10 @@ class RiskSettings(BaseModel):
     default_stop_loss_pips: float = 20
     default_take_profit_pips: float = 30
     min_rr: float = 1.2
+    risk_per_order: float = 10.0
+    daily_loss_budget: float = 1000.0
+    leverage: float = 1.0
+    max_margin_usage_pct: float = 80.0
 
 
 class StrategySettings(BaseModel):
@@ -45,6 +49,9 @@ class StrategySettings(BaseModel):
     rsi_period: int = 14
     rsi_buy_below: float = 35
     rsi_sell_above: float = 65
+    trend_guard_bars: int = 6
+    trend_guard_pct: float = 2.0
+    max_new_orders_per_bar: int = 4
 
 
 class GridStrikeSettings(BaseModel):
@@ -58,6 +65,16 @@ class GridStrikeSettings(BaseModel):
     min_spacing_pips: float = 3.0
     max_spacing_pips: float = 25.0
     order_lots: float = 0.01
+    grid_spacing: float = 120.0
+    take_profit_spacing: float = 120.0
+    stop_loss_spacing: float = 60.0
+
+
+class BasketProfitLockSettings(BaseModel):
+    enabled: bool = False
+    trail_pct: float = 30.0
+    activation_threshold: float = 500.0
+    cooldown_hours: float = 4.0
 
 
 class Mt5WorkerSettings(BaseModel):
@@ -81,6 +98,7 @@ class Settings(BaseModel):
     risk: RiskSettings = Field(default_factory=RiskSettings)
     strategy: StrategySettings = Field(default_factory=StrategySettings)
     grid_strike: GridStrikeSettings = Field(default_factory=GridStrikeSettings)
+    basket_profit_lock: BasketProfitLockSettings = Field(default_factory=BasketProfitLockSettings)
     mt5_worker: Mt5WorkerSettings = Field(default_factory=Mt5WorkerSettings)
 
 
