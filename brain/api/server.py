@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import threading
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -16,6 +19,7 @@ from shared.settings import load_settings
 
 settings = load_settings()
 app = FastAPI(title="Forex MT5 Bot Brain", version="0.1.0")
+logger = logging.getLogger("forex-brain")
 
 
 def create_market_data_provider():
@@ -30,6 +34,20 @@ bybit_webhook_cache = BybitWebhookCache()
 SIGNALS: Dict[str, Signal] = {}
 EXECUTIONS: List[ExecutionReport] = []
 HEARTBEATS: Dict[str, WorkerHeartbeat] = {}
+STATE_LOCK = threading.RLock()
+
+
+@dataclass
+class VirtualPosition:
+    symbol: str
+    side: SignalSide
+    lots: float
+    updated_at: datetime
+
+
+VIRTUAL_POSITIONS: Dict[str, VirtualPosition] = {}
+SCAN_STOP_EVENT = threading.Event()
+SCAN_THREAD: Optional[threading.Thread] = None
 
 
 class CreateSignalRequest(BaseModel):
@@ -48,6 +66,130 @@ class BybitWebhookPayload(BaseModel):
     timestamp: Optional[datetime] = None
 
 
+def _symbol_key(symbol: str) -> str:
+    return symbol.upper().replace("/", "")
+
+
+def _has_pending_signal_locked(symbol: str) -> bool:
+    return any(
+        s.symbol == symbol and s.status in {SignalStatus.CREATED, SignalStatus.CLAIMED, SignalStatus.EXECUTING}
+        for s in SIGNALS.values()
+    )
+
+
+def _should_enqueue_signal_locked(signal: Signal) -> bool:
+    symbol = _symbol_key(signal.symbol)
+    if _has_pending_signal_locked(symbol):
+        return False
+    current = VIRTUAL_POSITIONS.get(symbol)
+    if current is None:
+        return True
+    # Keep one directional exposure per symbol. Opposite side is allowed to
+    # flip (close existing and reopen new direction on netting accounts).
+    return current.side != signal.side
+
+
+def _update_virtual_position_on_fill(report: ExecutionReport, signal: Signal) -> None:
+    if report.status != SignalStatus.FILLED:
+        return
+
+    symbol = _symbol_key(signal.symbol)
+    filled_lots = float(report.lots if report.lots is not None else signal.lots)
+    if filled_lots <= 0:
+        return
+
+    now = datetime.now(timezone.utc)
+    current = VIRTUAL_POSITIONS.get(symbol)
+    if current is None:
+        VIRTUAL_POSITIONS[symbol] = VirtualPosition(
+            symbol=symbol,
+            side=signal.side,
+            lots=filled_lots,
+            updated_at=now,
+        )
+        return
+
+    if current.side == signal.side:
+        current.lots += filled_lots
+        current.updated_at = now
+        return
+
+    remaining = current.lots - filled_lots
+    if remaining > 1e-9:
+        current.lots = remaining
+        current.updated_at = now
+        return
+    if remaining < -1e-9:
+        VIRTUAL_POSITIONS[symbol] = VirtualPosition(
+            symbol=symbol,
+            side=signal.side,
+            lots=abs(remaining),
+            updated_at=now,
+        )
+        return
+    VIRTUAL_POSITIONS.pop(symbol, None)
+
+
+def _run_strategy_scan_once() -> list[Signal]:
+    created: list[Signal] = []
+    for symbol in settings.market_data.symbols:
+        try:
+            candles = provider.fetch_candles(
+                symbol,
+                period=settings.market_data.candles_period,
+                interval=settings.market_data.candles_interval,
+            )
+            signal = simple_signal(symbol, candles, settings)
+            if signal is None:
+                continue
+
+            signal.symbol = _symbol_key(signal.symbol)
+            with STATE_LOCK:
+                if not _should_enqueue_signal_locked(signal):
+                    continue
+                SIGNALS[signal.id] = signal
+            created.append(signal)
+        except Exception as exc:
+            logger.warning("scan failed for %s: %s", symbol, exc)
+    return created
+
+
+def _strategy_scan_loop() -> None:
+    interval = max(1, int(settings.market_data.refresh_seconds))
+    logger.info("auto-scan loop started (interval=%ss, symbols=%s)", interval, ",".join(settings.market_data.symbols))
+    while not SCAN_STOP_EVENT.is_set():
+        created = _run_strategy_scan_once()
+        if created:
+            logger.info(
+                "auto-scan created %d signal(s): %s",
+                len(created),
+                ", ".join(f"{s.symbol}:{s.side.value}" for s in created),
+            )
+        SCAN_STOP_EVENT.wait(interval)
+    logger.info("auto-scan loop stopped")
+
+
+@app.on_event("startup")
+def startup_strategy_loop() -> None:
+    global SCAN_THREAD
+    live_mode = settings.app.mode.lower() == "live"
+    if not live_mode or not settings.strategy.enabled:
+        logger.info("auto-scan loop disabled (mode=%s, strategy.enabled=%s)", settings.app.mode, settings.strategy.enabled)
+        return
+    if SCAN_THREAD and SCAN_THREAD.is_alive():
+        return
+    SCAN_STOP_EVENT.clear()
+    SCAN_THREAD = threading.Thread(target=_strategy_scan_loop, name="strategy-scan-loop", daemon=True)
+    SCAN_THREAD.start()
+
+
+@app.on_event("shutdown")
+def shutdown_strategy_loop() -> None:
+    SCAN_STOP_EVENT.set()
+    if SCAN_THREAD and SCAN_THREAD.is_alive():
+        SCAN_THREAD.join(timeout=3)
+
+
 def require_worker_token(
     x_worker_token: str = Header(default=""),
     worker_token: str = Query(default=""),
@@ -61,11 +203,16 @@ def require_worker_token(
 
 @app.get("/health")
 def health() -> dict:
+    with STATE_LOCK:
+        signal_count = len(SIGNALS)
+        worker_count = len(HEARTBEATS)
+        virtual_positions = len(VIRTUAL_POSITIONS)
     return {
         "ok": True,
         "mode": settings.app.mode,
-        "signals": len(SIGNALS),
-        "workers": len(HEARTBEATS),
+        "signals": signal_count,
+        "workers": worker_count,
+        "virtual_positions": virtual_positions,
         "time": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -92,21 +239,7 @@ def bybit_market_webhook(payload: BybitWebhookPayload) -> dict:
 
 @app.post("/api/scan", response_model=list[Signal])
 def scan() -> list[Signal]:
-    created: list[Signal] = []
-    for symbol in settings.market_data.symbols:
-        try:
-            candles = provider.fetch_candles(
-                symbol,
-                period=settings.market_data.candles_period,
-                interval=settings.market_data.candles_interval,
-            )
-            signal = simple_signal(symbol, candles, settings)
-            if signal:
-                SIGNALS[signal.id] = signal
-                created.append(signal)
-        except Exception as exc:
-            print(f"WARN scan failed for {symbol}: {exc}")
-    return created
+    return _run_strategy_scan_once()
 
 
 def _load_grid_strike_candles() -> dict[str, object]:
@@ -145,7 +278,7 @@ def grid_strike_plan() -> Optional[GridPlan]:
 def create_signal_from_grid(req: CreateSignalRequest = Body(...)) -> Signal:
     """Create a signal directly (for testing or manual trading)."""
     signal = Signal(
-        symbol=req.symbol,
+        symbol=_symbol_key(req.symbol),
         side=SignalSide(req.side.lower()),
         lots=req.lots,
         stop_loss=req.stop_loss,
@@ -153,22 +286,25 @@ def create_signal_from_grid(req: CreateSignalRequest = Body(...)) -> Signal:
         confidence=0.95,
         reason="manual-create",
     )
-    SIGNALS[signal.id] = signal
+    with STATE_LOCK:
+        SIGNALS[signal.id] = signal
     return signal
 
 
 @app.get("/api/signals", response_model=list[Signal])
 def list_signals() -> list[Signal]:
-    return list(SIGNALS.values())
+    with STATE_LOCK:
+        return list(SIGNALS.values())
 
 
 def _claim_next_signal(worker_id: str) -> Optional[Signal]:
-    for signal in SIGNALS.values():
-        if signal.status == SignalStatus.CREATED:
-            signal.status = SignalStatus.CLAIMED
-            signal.worker_id = worker_id
-            signal.claimed_at = datetime.now(timezone.utc)
-            return signal
+    with STATE_LOCK:
+        for signal in SIGNALS.values():
+            if signal.status == SignalStatus.CREATED:
+                signal.status = SignalStatus.CLAIMED
+                signal.worker_id = worker_id
+                signal.claimed_at = datetime.now(timezone.utc)
+                return signal
     return None
 
 
@@ -198,16 +334,20 @@ def next_signal_plain(worker_id: str, _: None = Depends(require_worker_token)) -
 
 @app.post("/api/worker/execution-report")
 def execution_report(report: ExecutionReport, _: None = Depends(require_worker_token)) -> dict:
-    EXECUTIONS.append(report)
-    signal = SIGNALS.get(report.signal_id)
-    if signal:
-        signal.status = report.status
-    return {"ok": True, "reports": len(EXECUTIONS)}
+    with STATE_LOCK:
+        EXECUTIONS.append(report)
+        signal = SIGNALS.get(report.signal_id)
+        if signal:
+            signal.status = report.status
+            _update_virtual_position_on_fill(report, signal)
+        report_count = len(EXECUTIONS)
+    return {"ok": True, "reports": report_count}
 
 
 @app.post("/api/worker/heartbeat")
 def heartbeat(hb: WorkerHeartbeat, _: None = Depends(require_worker_token)) -> dict:
-    HEARTBEATS[hb.worker_id] = hb
+    with STATE_LOCK:
+        HEARTBEATS[hb.worker_id] = hb
     return {"ok": True, "server_time": datetime.now(timezone.utc).isoformat()}
 
 
@@ -222,15 +362,16 @@ def heartbeat_ping(
     open_positions: int = 0,
     _: None = Depends(require_worker_token),
 ) -> str:
-    HEARTBEATS[worker_id] = WorkerHeartbeat(
-        worker_id=worker_id,
-        mt5_connected=mt5_connected,
-        account_login=account_login,
-        broker=broker,
-        balance=balance,
-        equity=equity,
-        open_positions=open_positions,
-    )
+    with STATE_LOCK:
+        HEARTBEATS[worker_id] = WorkerHeartbeat(
+            worker_id=worker_id,
+            mt5_connected=mt5_connected,
+            account_login=account_login,
+            broker=broker,
+            balance=balance,
+            equity=equity,
+            open_positions=open_positions,
+        )
     return "ok"
 
 
@@ -254,10 +395,12 @@ def execution_report_ping(
         lots=lots,
         message=message,
     )
-    EXECUTIONS.append(report)
-    signal = SIGNALS.get(report.signal_id)
-    if signal:
-        signal.status = report.status
+    with STATE_LOCK:
+        EXECUTIONS.append(report)
+        signal = SIGNALS.get(report.signal_id)
+        if signal:
+            signal.status = report.status
+            _update_virtual_position_on_fill(report, signal)
     return "ok"
 
 
@@ -272,7 +415,7 @@ def create_test_signal(
 ) -> Signal:
     """Create a test signal for worker verification."""
     signal = Signal(
-        symbol=symbol,
+        symbol=_symbol_key(symbol),
         side=SignalSide(side.lower()),
         lots=lots,
         stop_loss=stop_loss,
@@ -280,5 +423,6 @@ def create_test_signal(
         confidence=0.95,
         reason="test-signal",
     )
-    SIGNALS[signal.id] = signal
+    with STATE_LOCK:
+        SIGNALS[signal.id] = signal
     return signal
