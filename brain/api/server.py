@@ -149,6 +149,31 @@ def _enqueue_auto_close_signals_locked(worker_id: str, profit_pct: float) -> lis
     return created
 
 
+def _enqueue_reopen_after_close_locked(signal: Signal, report: ExecutionReport) -> Optional[Signal]:
+    if signal.action != SignalAction.CLOSE:
+        return None
+    if report.status != SignalStatus.FILLED:
+        return None
+    if not settings.mt5_worker.auto_reopen_after_close:
+        return None
+
+    reopen_side = SignalSide.BUY if signal.side == SignalSide.SELL else SignalSide.SELL
+    reopen_signal = Signal(
+        symbol=_symbol_key(signal.symbol),
+        side=reopen_side,
+        action=SignalAction.OPEN,
+        lots=float(report.lots if report.lots is not None else signal.lots),
+        confidence=1.0,
+        reason=f"auto-reopen-after-close:{signal.id}",
+        target_worker_id=signal.target_worker_id or report.worker_id,
+    )
+
+    if not _should_enqueue_signal_locked(reopen_signal):
+        return None
+    SIGNALS[reopen_signal.id] = reopen_signal
+    return reopen_signal
+
+
 def _update_virtual_position_on_fill(report: ExecutionReport, signal: Signal) -> None:
     if report.status != SignalStatus.FILLED:
         return
@@ -488,6 +513,7 @@ def execution_report(report: ExecutionReport, _: None = Depends(require_worker_t
         if signal:
             signal.status = report.status
             _update_virtual_position_on_fill(report, signal)
+            _enqueue_reopen_after_close_locked(signal, report)
         report_count = len(EXECUTIONS)
     return {"ok": True, "reports": report_count}
 
@@ -558,6 +584,7 @@ def execution_report_ping(
         if signal:
             signal.status = report.status
             _update_virtual_position_on_fill(report, signal)
+            _enqueue_reopen_after_close_locked(signal, report)
     return "ok"
 
 

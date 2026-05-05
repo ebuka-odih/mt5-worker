@@ -108,6 +108,22 @@ The worker will:
 3. Log: `[DRY_RUN] Would execute signal...`
 4. Report back: `status=filled, message=DRY_RUN accepted signal...`
 
+## Position Telemetry
+
+Every heartbeat now sends detailed open position data (ticket, symbol, side,
+lots, entry/current price, floating PnL, magic, comment) to the VPS brain.
+You can query this from VPS using:
+
+```bash
+curl "http://127.0.0.1:8780/api/workers?worker_token=<TOKEN>"
+curl "http://127.0.0.1:8780/api/workers/<WORKER_ID>/positions?worker_token=<TOKEN>"
+curl "http://127.0.0.1:8780/api/orders?worker_token=<TOKEN>&worker_id=<WORKER_ID>"
+curl -X POST "http://127.0.0.1:8780/api/workers/<WORKER_ID>/auto-close?worker_token=<TOKEN>&profit_pct=3.0"
+```
+
+When `mt5_worker.auto_reopen_after_close=true`, a filled auto-close signal also
+queues a new open signal so the worker can re-enter immediately.
+
 ## Production Deployment (Optional)
 
 ### Using NSSM (Non-Sucking Service Manager)

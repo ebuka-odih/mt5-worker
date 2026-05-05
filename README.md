@@ -35,6 +35,23 @@ curl -X POST http://127.0.0.1:8780/api/grid-strike/scan
 curl -X POST http://127.0.0.1:8780/api/grid-strike/plan
 ```
 
+### Worker Position State Endpoints
+
+Use the worker token from `config/settings.yaml` as `worker_token` query param.
+
+```bash
+curl "http://127.0.0.1:8780/api/workers?worker_token=<TOKEN>"
+curl "http://127.0.0.1:8780/api/workers/windows-mt5-atlas-01?worker_token=<TOKEN>"
+curl "http://127.0.0.1:8780/api/workers/windows-mt5-atlas-01/positions?worker_token=<TOKEN>"
+curl "http://127.0.0.1:8780/api/orders?worker_token=<TOKEN>&worker_id=windows-mt5-atlas-01&limit=20"
+curl -X POST "http://127.0.0.1:8780/api/workers/windows-mt5-atlas-01/auto-close?worker_token=<TOKEN>&profit_pct=3.0"
+```
+
+`/api/workers/{worker_id}/auto-close` creates close signals for positions whose
+floating gain is at or above `profit_pct`; after a close fill, the brain
+automatically queues a new open signal in the same direction when
+`mt5_worker.auto_reopen_after_close: true`.
+
 ## Windows MT5 Worker Setup
 
 ### Prerequisites

@@ -136,6 +136,16 @@ def test_auto_close_and_order_details_endpoints() -> None:
     )
     assert exec_resp.status_code == 200
 
+    signals_after_close = client.get("/api/signals").json()
+    reopen_signal = next(
+        row
+        for row in signals_after_close
+        if row["action"] == "open" and row["reason"] == f"auto-reopen-after-close:{close_signal_id}"
+    )
+    assert reopen_signal["symbol"] == "BTCUSD"
+    assert reopen_signal["side"] == "buy"
+    assert reopen_signal["target_worker_id"] == "windows-mt5-atlas-01"
+
     orders_resp = client.get("/api/orders", params={**_token_param(), "worker_id": "windows-mt5-atlas-01"})
     assert orders_resp.status_code == 200
     orders = orders_resp.json()
