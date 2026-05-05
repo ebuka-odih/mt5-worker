@@ -1,54 +1,24 @@
-# Forex MT5 Bot
+# Forex MT5 Bot — Atlas Funded Grid-Strike System
 
 Linux VPS strategy brain + Windows local MT5 execution worker.
+Designed for **Atlas Funded** $400k challenge (4% DD, 10% monthly target).
 
-## macOS production path
+## Architecture
 
-MetaTrader 5 on macOS runs inside the app's bundled Wine prefix. The official
-`MetaTrader5` Python package only ships Windows wheels, so the practical macOS
-deployment model is:
-
-- Run the brain/API natively on macOS Python.
-- Run the existing `windows_mt5_worker.py` inside the MT5 Wine prefix using the
-  bundled `wine64`.
-
-This repo includes helper scripts for that flow:
-
-```bash
-cd ~/Downloads/mt5-worker
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-brain.txt
-
-./scripts/setup_macos_mt5_worker.sh
-# edit mt5-worker/.env
-
-./scripts/run_macos_brain.sh
-./scripts/run_macos_mt5_worker.sh
+```
+┌─────────────────────┐         ┌──────────────────────────┐
+│  VPS Brain (Linux)  │◄────────│  MT5 Worker (Windows)    │
+│  Port 8780          │  polls  │  MetaTrader 5 terminal   │
+│  Grid-Strike engine │────────►│  Atlas funded account    │
+│  Signal generation   │  exec  │  Order execution         │
+└─────────────────────┘         └──────────────────────────┘
+        ▲
+        │ Cloudflare Tunnel
+        ▼
+https://jake-divisions-vanilla-cradle.trycloudflare.com
 ```
 
-`run_macos_brain.sh` prefers a native macOS Python 3.10+ virtualenv. If this
-machine only has Python 3.9, it falls back to the Windows Python installed
-inside the MT5 Wine prefix so the stack still runs locally.
-
-The worker `.env` should normally point at the local API:
-
-```env
-VPS_API_BASE=http://127.0.0.1:8780
-WORKER_TOKEN=CHANGE_ME_LONG_RANDOM_TOKEN
-WORKER_ID=macos-mt5-local-01
-DRY_RUN=true
-```
-
-## Quick test live public FX data
-
-```bash
-cd ~/.hermes/projects/forex-mt5-bot
-source venv/bin/activate
-PYTHONPATH=. python brain/data/forex_data.py
-```
-
-## Run the VPS brain API locally
+## VPS Brain Setup
 
 ```bash
 cd ~/.hermes/projects/forex-mt5-bot
@@ -56,43 +26,193 @@ source venv/bin/activate
 PYTHONPATH=. python -m uvicorn brain.api.server:app --host 0.0.0.0 --port 8780
 ```
 
-Then test:
+### Quick API Tests
 
 ```bash
 curl http://127.0.0.1:8780/health
 curl http://127.0.0.1:8780/api/market/quotes
-curl -X POST http://127.0.0.1:8780/api/scan
 curl -X POST http://127.0.0.1:8780/api/grid-strike/scan
 curl -X POST http://127.0.0.1:8780/api/grid-strike/plan
 ```
 
-## Grid Strike scalping filter
+## Windows MT5 Worker Setup
 
-The first forex strategy is the Grid Strike system: it scans configured FX pairs,
-rejects markets that are too flat, too wide, or too one-directional, ranks the
-remaining symbols, and builds symmetric buy/sell strike levels around the current
-mid price for paper/demo testing.
+### Prerequisites
 
-Key files:
+- Windows 10/11 with Python 3.9+
+- MetaTrader 5 installed and logged into your Atlas funded account
+- MT5 must be **open and connected** for the worker to trade
 
-- `brain/signals/grid_strike.py` — Grid Strike scoring, currency filter, and grid plan builder.
-- `config/settings.yaml` → `grid_strike:` — score thresholds, range limits, grid density, spacing, and lot size.
-- `tests/test_grid_strike.py` and `tests/test_grid_strike_api.py` — regression tests.
+### Step-by-Step Setup
 
-## Windows worker
+**1. Copy the worker files to Windows:**
 
-Copy `mt5-worker/windows_mt5_worker.py` to the Windows machine with MT5 installed.
+```cmd
+mkdir C:\mt5-worker
+copy \\vps\path\mt5-worker\windows_mt5_worker.py C:\mt5-worker\
+copy \\vps\path\mt5-worker\requirements.txt C:\mt5-worker\
+copy \\vps\path\mt5-worker\.env.example C:\mt5-worker\
+```
 
-Create `.env` on Windows:
+Or clone the repo on Windows:
+```cmd
+git clone https://github.com/YOUR_USER/forex-mt5-bot.git C:\forex-mt5-bot
+cd C:\forex-mt5-bot\mt5-worker
+```
+
+**2. Create virtual environment and install dependencies:**
+
+```cmd
+cd C:\mt5-worker
+py -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+**3. Configure the worker:**
+
+```cmd
+copy .env.example .env
+notepad .env
+```
+
+Edit `.env` with these values:
 
 ```env
-VPS_API_BASE=http://YOUR_VPS_IP:8780
-WORKER_TOKEN=CHANGE_ME_LONG_RANDOM_TOKEN
+# VPS Brain URL (Cloudflare tunnel — refresh if stale)
+VPS_API_BASE=https://jake-divisions-vanilla-cradle.trycloudflare.com
+
+# Worker auth token (MUST match VPS config)
+WORKER_TOKEN=991403c231352264deb0d3e949324189eff63f08ede89901d0dc22a3e152a693
+
+# Worker ID (for multi-worker setups)
 WORKER_ID=windows-mt5-local-01
+
+# Start with DRY_RUN=true, then false for live
 DRY_RUN=true
 ```
 
-Start in DRY_RUN first. Then demo. Only then live.
+**4. Test in dry-run mode first:**
+
+```cmd
+venv\Scripts\python windows_mt5_worker.py
+```
+
+You should see:
+```
+[INFO] mt5-worker: Starting Windows MT5 worker
+[INFO] mt5-worker:   VPS API:   https://jake-divisions-vanilla-cradle.trycloudflare.com
+[INFO] mt5-worker:   Dry Run:   True
+[INFO] mt5-worker: MT5 connected: login=XXXXX, server=AtlasFunded, balance=400000.0
+```
+
+**5. Go live (only after dry-run looks good):**
+
+Edit `.env`:
+```env
+DRY_RUN=false
+```
+
+Restart the worker.
+
+### Running in Background
+
+**Option A — Simple background:**
+```cmd
+start /b venv\Scripts\python windows_mt5_worker.py >> worker.log 2>&1
+```
+
+**Option B — Windows Service with NSSM:**
+```cmd
+nssm install MT5Worker "C:\mt5-worker\venv\Scripts\python.exe" "C:\mt5-worker\windows_mt5_worker.py"
+nssm set MT5Worker AppDirectory "C:\mt5-worker"
+nssm set MT5Worker AppStdout "C:\mt5-worker\worker.log"
+nssm set MT5Worker AppStderr "C:\mt5-worker\worker.log"
+nssm set MT5Worker AppRotateFiles 1
+nssm start MT5Worker
+```
+
+**Option C — Task Scheduler (auto-start on boot):**
+```cmd
+schtasks /create /tn "MT5 Worker" /tr "C:\mt5-worker\venv\Scripts\python.exe C:\mt5-worker\windows_mt5_worker.py" /sc onstart /rl limited
+```
+
+## Configuration Reference
+
+| Variable | Required | Description | Default |
+|----------|----------|-------------|---------|
+| `VPS_API_BASE` | ✅ | VPS brain URL (tunnel) | `http://127.0.0.1:8780` |
+| `WORKER_TOKEN` | ✅ | Auth token (must match VPS) | — |
+| `WORKER_ID` | No | Worker identifier | `windows-mt5-local-01` |
+| `DRY_RUN` | No | `true`=test, `false`=live | `true` |
+| `MT5_MAGIC` | No | Magic number for orders | `552501` |
+| `POLL_SECONDS` | No | Signal poll interval | `1` |
+
+## Risk Parameters (Atlas Funded)
+
+Configured in `config/settings.yaml`:
+
+- **Starting balance:** $400,000
+- **Max drawdown:** 4% ($16,000)
+- **Daily loss budget:** $4,000 (1%)
+- **Risk per order:** $1,750
+- **Leverage:** 10x max
+- **Grid:** 500 levels each side
+- **TP/SL:** 1000/500 pips (1:2 R:R)
+- **Symbols:** BTCUSD, ETHUSD
+
+## Grid-Strike Strategy
+
+Scans configured FX pairs, rejects flat/trending/wide markets, ranks by score,
+and builds symmetric buy/sell grid levels around current price.
+
+Key files:
+- `brain/signals/grid_strike.py` — scoring, filter, grid plan builder
+- `config/settings.yaml` → `grid_strike:` section
+- `brain/simulation/grid_dry_run.py` — backtester
+- `portfolio_sim.py` — portfolio simulation
+
+## Troubleshooting
+
+### Worker can't connect to VPS
+```cmd
+curl https://jake-divisions-vanilla-cradle.trycloudflare.com/health
+```
+If tunnel is stale, regenerate on VPS: `cloudflared tunnel --url http://localhost:8780`
+
+### MT5 not connecting
+- Ensure MT5 is open and logged into Atlas funded account
+- Check account balance is $400k
+- Verify symbols (BTCUSD, ETHUSD) are available
+
+### No signals coming through
+- Check VPS brain is running on port 8780
+- Verify `WORKER_TOKEN` matches in both `.env` files
+- Check `worker.log` for errors
+
+### Token mismatch
+The token must be identical on both sides:
+- **Windows** `.env`: `WORKER_TOKEN=<token>`
+- **VPS** `.env`: `VPS_WORKER_TOKEN=<same token>`
+
+## Quick Reference Commands
+
+```cmd
+:: Start worker
+venv\Scripts\python windows_mt5_worker.py
+
+:: View logs
+type worker.log
+
+:: Check if running
+tasklist | findstr python
+
+:: Stop worker
+taskkill /f /im python.exe
+
+:: Restart
+taskkill /f /im python.exe && venv\Scripts\python windows_mt5_worker.py
+```
 
 ## Go Live Checklist (Auto-Loop + Windows Pull)
 
@@ -105,7 +225,7 @@ On the VPS repository (`~/.hermes/projects/forex-mt5-bot`):
 
 1. In `config/settings.yaml`, set:
    - `app.mode: live`
-   - `market_data.symbols: [BTCUSD, ETHUSD]`
+   - `market_data.symbols` to `BTCUSD` and `ETHUSD` only
 2. Restart the brain service/container.
 3. Verify health:
 
@@ -113,7 +233,7 @@ On the VPS repository (`~/.hermes/projects/forex-mt5-bot`):
 curl http://127.0.0.1:8780/health
 ```
 
-Expected response includes `\"mode\":\"live\"`.
+Expected response includes `"mode":"live"`.
 
 ### 2) Windows: pull latest worker/bridge code
 
@@ -140,17 +260,9 @@ DRY_RUN=false
 
 ### 4) Windows: restart worker
 
-Foreground:
-
-```cmd
-cd C:\mt5-worker
-venv\Scripts\python windows_mt5_worker.py
-```
-
-Background:
-
 ```cmd
 taskkill /f /im python.exe
+cd C:\mt5-worker
 start /b venv\Scripts\python windows_mt5_worker.py >> worker.log 2>&1
 ```
 

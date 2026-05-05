@@ -39,6 +39,6 @@ def test_config_is_focused_on_bitcoin_funded_challenge_rules() -> None:
     settings = load_settings()
 
     assert "BTCUSD" in settings.market_data.symbols
-    assert settings.risk.max_risk_per_trade_pct == 2.0
+    assert settings.risk.max_risk_per_trade_pct == 0.44
     assert settings.risk.funded_challenge_mode is True
-    assert entry_risk_budget(100_000, settings.risk) == 2_000
+    assert entry_risk_budget(100_000, settings.risk) == 440

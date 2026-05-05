@@ -10,7 +10,7 @@ def test_month_grid_config_targets_30_day_bybit_btc_eth_and_1000_levels() -> Non
     assert settings.market_data.provider == "bybit"
     assert settings.market_data.candles_period == "30d"
     assert settings.market_data.candles_interval == "1h"
-    assert settings.market_data.symbols == ["BTCUSD", "ETHUSD"]
+    assert settings.market_data.symbols == ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD"]
     assert settings.grid_strike.levels_each_side == 500
     assert settings.grid_strike.levels_each_side * 2 == 1000
 

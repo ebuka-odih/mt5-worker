@@ -24,6 +24,9 @@ class GridStrikeSettings(BaseModel):
     min_spacing_pips: float = 3.0
     max_spacing_pips: float = 25.0
     order_lots: float = 0.01
+    grid_spacing: float = 120.0
+    take_profit_spacing: float = 120.0
+    stop_loss_spacing: float = 60.0
 
 
 class GridLevel(BaseModel):
@@ -90,7 +93,7 @@ def score_grid_candidate(
             mid_price=0.0,
             range_pct=0.0,
             trend_ratio=1.0,
-            grid_spacing_pips=settings.min_spacing_pips,
+            grid_spacing_pips=settings.grid_spacing,
             reason="not enough candle data for grid strike filter",
         )
 
@@ -107,9 +110,8 @@ def score_grid_candidate(
     directional_move = abs(float(close.tail(window).mean()) - float(close.head(window).mean()))
     trend_ratio = min(1.0, directional_move / raw_range) if raw_range > 0 else 1.0
 
-    pip = pip_size(symbol)
-    spacing_pips = raw_range / max(settings.levels_each_side * 2, 1) / pip if pip > 0 else settings.min_spacing_pips
-    spacing_pips = max(settings.min_spacing_pips, min(settings.max_spacing_pips, spacing_pips))
+    # Use fixed grid spacing from settings (validated on 42d backtest)
+    spacing_pips = settings.grid_spacing
 
     reasons: list[str] = []
     if range_pct < settings.min_range_pct:
@@ -151,12 +153,13 @@ def build_grid_plan(
     pip = pip_size(candidate.symbol)
     step = candidate.grid_spacing_pips * pip
 
+    lots = settings.get_lots(candidate.symbol)
     buy_levels = [
-        GridLevel(index=i, side="buy", price=_round_price(candidate.symbol, mid - (step * i)), lots=settings.order_lots)
+        GridLevel(index=i, side="buy", price=_round_price(candidate.symbol, mid - (step * i)), lots=lots)
         for i in range(1, settings.levels_each_side + 1)
     ]
     sell_levels = [
-        GridLevel(index=i, side="sell", price=_round_price(candidate.symbol, mid + (step * i)), lots=settings.order_lots)
+        GridLevel(index=i, side="sell", price=_round_price(candidate.symbol, mid + (step * i)), lots=lots)
         for i in range(1, settings.levels_each_side + 1)
     ]
 
@@ -167,7 +170,7 @@ def build_grid_plan(
         lower_bound=buy_levels[-1].price,
         upper_bound=sell_levels[-1].price,
         grid_spacing_pips=candidate.grid_spacing_pips,
-        lots_per_level=settings.order_lots,
+        lots_per_level=lots,
         buy_levels=buy_levels,
         sell_levels=sell_levels,
         reason=candidate.reason,

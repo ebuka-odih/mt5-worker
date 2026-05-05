@@ -5,6 +5,8 @@ from datetime import date
 
 import pandas as pd
 
+from brain.data.trade_logger import TradeLogger
+
 
 @dataclass
 class GridSimulationConfig:
@@ -17,12 +19,12 @@ class GridSimulationConfig:
 
     starting_balance: float = 10_000.0
     max_total_drawdown_pct: float = 20.0
-    daily_loss_budget: float = 66.67
+    daily_loss_budget: float = 200.0
     total_grid_levels: int = 1000
     max_active_orders: int = 30
-    grid_spacing: float = 25.0
-    take_profit_spacing: float = 25.0
-    stop_loss_spacing: float = 250.0
+    grid_spacing: float = 120.0
+    take_profit_spacing: float = 120.0
+    stop_loss_spacing: float = 60.0
     risk_per_order: float = 10.0
     trend_guard_bars: int = 6
     trend_guard_pct: float = 2.0
@@ -168,8 +170,9 @@ def _daily_key(index_value: object) -> date | int:
         return 0
 
 
-def run_grid_simulation(candles: pd.DataFrame, cfg: GridSimulationConfig | None = None) -> GridSimulationResult:
+def run_grid_simulation(candles: pd.DataFrame, cfg: GridSimulationConfig | None = None, symbol: str = "BTCUSD") -> GridSimulationResult:
     cfg = cfg or GridSimulationConfig()
+    logger = TradeLogger(symbol)
     if candles.empty:
         return GridSimulationResult(
             starting_balance=cfg.starting_balance,
@@ -235,11 +238,15 @@ def run_grid_simulation(candles: pd.DataFrame, cfg: GridSimulationConfig | None 
             hit_sl = low <= pos.sl if pos.side == "buy" else high >= pos.sl
             hit_tp = high >= pos.tp if pos.side == "buy" else low <= pos.tp
             if hit_sl:
-                balance += _position_pnl(pos, pos.sl, cfg)
+                pnl = _position_pnl(pos, pos.sl, cfg)
+                balance += pnl
                 orders_closed_sl += 1
+                logger.log_close(pos.side, pos.entry, pos.sl, pnl, "sl", timestamp=str(idx))
             elif hit_tp:
-                balance += _position_pnl(pos, pos.tp, cfg)
+                pnl = _position_pnl(pos, pos.tp, cfg)
+                balance += pnl
                 orders_closed_tp += 1
+                logger.log_close(pos.side, pos.entry, pos.tp, pnl, "tp", timestamp=str(idx))
             else:
                 survivors.append(pos)
         positions = survivors
@@ -292,6 +299,11 @@ def run_grid_simulation(candles: pd.DataFrame, cfg: GridSimulationConfig | None 
                         positions.append(candidate)
                         orders_opened += 1
                         new_orders_this_bar += 1
+                        logger.log_fill(
+                            candidate.side, candidate.entry, candidate.tp, candidate.sl,
+                            candidate.lot_size, candidate.risk, timestamp=str(idx),
+                            bar_no=bar_no, price_at_fill=close,
+                        )
 
         max_active_seen = max(max_active_seen, len(positions))
         max_margin_used = max(max_margin_used, sum(p.margin_required for p in positions))
@@ -306,6 +318,7 @@ def run_grid_simulation(candles: pd.DataFrame, cfg: GridSimulationConfig | None 
             stop_reason = "max_drawdown"
             drawdown = cfg.starting_balance - min_balance
         max_drawdown = max(max_drawdown, drawdown)
+        logger.log_equity(balance, equity, len(positions), close, timestamp=str(idx))
         equity_curve.append(
             {
                 "time": str(idx),
@@ -323,6 +336,7 @@ def run_grid_simulation(candles: pd.DataFrame, cfg: GridSimulationConfig | None 
 
     final_close = float(candles["Close"].iloc[min(len(equity_curve), len(candles)) - 1]) if equity_curve else float(candles["Close"].iloc[-1])
     final_equity = balance + sum(_mark_to_market(pos, final_close) for pos in positions)
+    logger.flush()
     return GridSimulationResult(
         starting_balance=cfg.starting_balance,
         balance=round(balance, 2),
