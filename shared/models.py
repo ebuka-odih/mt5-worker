@@ -22,6 +22,11 @@ class SignalStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class SignalAction(str, Enum):
+    OPEN = "open"
+    CLOSE = "close"
+
+
 class ForexQuote(BaseModel):
     symbol: str
     bid: Optional[float] = None
@@ -36,7 +41,9 @@ class Signal(BaseModel):
     symbol: str
     side: SignalSide
     order_type: str = "market"
+    action: SignalAction = SignalAction.OPEN
     lots: float
+    position_ticket: Optional[int] = None
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     confidence: float = 0.0
@@ -45,6 +52,7 @@ class Signal(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     claimed_at: Optional[datetime] = None
     worker_id: Optional[str] = None
+    target_worker_id: Optional[str] = None
 
 
 class ExecutionReport(BaseModel):
@@ -58,6 +66,21 @@ class ExecutionReport(BaseModel):
     reported_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class WorkerPosition(BaseModel):
+    ticket: Optional[int] = None
+    symbol: str
+    side: SignalSide
+    lots: float
+    entry_price: Optional[float] = None
+    current_price: Optional[float] = None
+    profit: Optional[float] = None
+    swap: Optional[float] = None
+    commission: Optional[float] = None
+    opened_at: Optional[datetime] = None
+    magic: Optional[int] = None
+    comment: str = ""
+
+
 class WorkerHeartbeat(BaseModel):
     worker_id: str
     mt5_connected: bool
@@ -66,4 +89,5 @@ class WorkerHeartbeat(BaseModel):
     balance: Optional[float] = None
     equity: Optional[float] = None
     open_positions: int = 0
+    positions: list[WorkerPosition] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
