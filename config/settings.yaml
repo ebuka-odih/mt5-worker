@@ -16,8 +16,6 @@ market_data:
   symbols:
     - BTCUSD
     - ETHUSD
-    - SOLUSD
-    - XRPUSD
 
 risk:
   account_currency: USD
@@ -67,8 +65,6 @@ grid_strike:
   symbol_lots:
     BTCUSD: 0.01
     ETHUSD: 0.10
-    SOLUSD: 0.10
-    XRPUSD: 1.00
 
 basket_profit_lock:
   enabled: true

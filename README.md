@@ -159,7 +159,7 @@ Configured in `config/settings.yaml`:
 - **Leverage:** 10x max
 - **Grid:** 500 levels each side
 - **TP/SL:** 1000/500 pips (1:2 R:R)
-- **Symbols:** BTCUSD, ETHUSD, SOLUSD, XRPUSD
+- **Symbols:** BTCUSD, ETHUSD
 
 ## Grid-Strike Strategy
 
@@ -183,7 +183,7 @@ If tunnel is stale, regenerate on VPS: `cloudflared tunnel --url http://localhos
 ### MT5 not connecting
 - Ensure MT5 is open and logged into Atlas funded account
 - Check account balance is $400k
-- Verify symbols (BTCUSD, ETHUSD, SOLUSD, XRPUSD) are available
+- Verify symbols (BTCUSD, ETHUSD) are available
 
 ### No signals coming through
 - Check VPS brain is running on port 8780
@@ -212,4 +212,69 @@ taskkill /f /im python.exe
 
 :: Restart
 taskkill /f /im python.exe && venv\Scripts\python windows_mt5_worker.py
+```
+
+## Go Live Checklist (Auto-Loop + Windows Pull)
+
+This release adds an automatic strategy scan loop in the VPS brain. It only runs
+when `app.mode` is set to `live`.
+
+### 1) VPS: enable auto-loop and restart brain
+
+On the VPS repository (`~/.hermes/projects/forex-mt5-bot`):
+
+1. In `config/settings.yaml`, set:
+   - `app.mode: live`
+   - `market_data.symbols` to `BTCUSD` and `ETHUSD` only
+2. Restart the brain service/container.
+3. Verify health:
+
+```bash
+curl http://127.0.0.1:8780/health
+```
+
+Expected response includes `"mode":"live"`.
+
+### 2) Windows: pull latest worker/bridge code
+
+If the full repo is cloned on Windows:
+
+```cmd
+cd C:\forex-mt5-bot
+git pull
+```
+
+If you run a standalone worker folder (`C:\mt5-worker`), copy updated files from
+the repo to that folder after pulling.
+
+### 3) Windows: verify `.env` for live execution
+
+In `C:\mt5-worker\.env` confirm:
+
+```env
+VPS_API_BASE=https://<your-cloudflare-or-vps-url>
+WORKER_TOKEN=<must match VPS token>
+WORKER_ID=windows-mt5-local-01
+DRY_RUN=false
+```
+
+### 4) Windows: restart worker
+
+```cmd
+taskkill /f /im python.exe
+cd C:\mt5-worker
+start /b venv\Scripts\python windows_mt5_worker.py >> worker.log 2>&1
+```
+
+### 5) Confirm end-to-end flow
+
+1. Windows log should show:
+   - `MT5 connected`
+   - `Received signal: ... side=buy|sell`
+   - `Order filled` or explicit rejection reason
+2. VPS should show worker heartbeats and non-zero signal activity:
+
+```bash
+curl http://127.0.0.1:8780/health
+curl http://127.0.0.1:8780/api/signals
 ```

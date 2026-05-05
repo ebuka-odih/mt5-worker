@@ -51,3 +51,34 @@ def test_grid_strike_plan_endpoint_builds_plan_for_best_candidate(monkeypatch) -
     assert plan["symbol"] == "EURUSD"
     assert len(plan["buy_levels"]) == server.settings.grid_strike.levels_each_side
     assert len(plan["sell_levels"]) == server.settings.grid_strike.levels_each_side
+
+
+def test_worker_ping_accepts_query_token(monkeypatch) -> None:
+    monkeypatch.setattr(server.settings.api, "worker_token", "test-token")
+
+    response = TestClient(server.app).get(
+        "/api/worker/heartbeat-ping",
+        params={
+            "worker_id": "macos-mt5-local-01",
+            "mt5_connected": "true",
+            "worker_token": "test-token",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.text == "ok"
+
+
+def test_worker_ping_rejects_invalid_query_token(monkeypatch) -> None:
+    monkeypatch.setattr(server.settings.api, "worker_token", "test-token")
+
+    response = TestClient(server.app).get(
+        "/api/worker/heartbeat-ping",
+        params={
+            "worker_id": "macos-mt5-local-01",
+            "mt5_connected": "true",
+            "worker_token": "wrong-token",
+        },
+    )
+
+    assert response.status_code == 401

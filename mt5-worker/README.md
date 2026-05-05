@@ -133,6 +133,41 @@ Create a scheduled task to run on Windows startup:
 schtasks /create /tn "MT5 Worker" /tr "C:\mt5-worker\venv\Scripts\python.exe C:\mt5-worker\windows_mt5_worker.py" /sc onstart /rl limited
 ```
 
+## Go Live With VPS Auto-Loop
+
+The VPS brain can now auto-generate signals in live mode. To use it safely:
+
+1. **On VPS, set live mode**
+   - In `config/settings.yaml`, set `app.mode: live`.
+   - Keep trade symbols restricted to `BTCUSD` and `ETHUSD`.
+   - Restart the VPS brain container/service.
+
+2. **On Windows, pull latest code**
+   ```cmd
+   cd C:\forex-mt5-bot
+   git pull
+   ```
+   If you use `C:\mt5-worker` as a standalone folder, update it from the pulled files.
+
+3. **Set worker live env**
+   ```env
+   VPS_API_BASE=https://<your-vps-url>
+   WORKER_TOKEN=<must match VPS token>
+   WORKER_ID=windows-mt5-local-01
+   DRY_RUN=false
+   ```
+
+4. **Restart the worker**
+   ```cmd
+   taskkill /f /im python.exe
+   cd C:\mt5-worker
+   start /b venv\Scripts\python windows_mt5_worker.py >> worker.log 2>&1
+   ```
+
+5. **Verify logs**
+   - `Received signal ... side=buy|sell`
+   - `Order filled ...` (or a clear MT5 rejection reason)
+
 ## Troubleshooting
 
 ### MT5 Connection Issues
