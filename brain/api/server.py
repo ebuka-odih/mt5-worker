@@ -54,7 +54,7 @@ class CreateSignalRequest(BaseModel):
     symbol: str
     side: str = "buy"
     action: str = "open"
-    lots: float = 0.01
+    lots: Optional[float] = None
     position_ticket: Optional[int] = None
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
@@ -362,11 +362,13 @@ def grid_strike_plan() -> Optional[GridPlan]:
 @app.post("/api/signals/create", response_model=Signal)
 def create_signal_from_grid(req: CreateSignalRequest = Body(...)) -> Signal:
     """Create a signal directly (for testing or manual trading)."""
+    symbol_key = _symbol_key(req.symbol)
+    lots = req.lots if req.lots is not None else settings.grid_strike.get_lots(symbol_key)
     signal = Signal(
-        symbol=_symbol_key(req.symbol),
+        symbol=symbol_key,
         side=SignalSide(req.side.lower()),
         action=SignalAction(req.action.lower()),
-        lots=req.lots,
+        lots=lots,
         position_ticket=req.position_ticket,
         stop_loss=req.stop_loss,
         take_profit=req.take_profit,
