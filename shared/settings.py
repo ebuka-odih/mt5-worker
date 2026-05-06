@@ -32,6 +32,8 @@ class RiskSettings(BaseModel):
     challenge_max_days: int = 60
     max_open_positions: int = 3
     max_positions_per_symbol: int = 1
+    max_same_side_positions: int = 0
+    max_directional_skew: int = 0
     default_stop_loss_pips: float = 20
     default_take_profit_pips: float = 30
     min_rr: float = 1.2
@@ -68,6 +70,11 @@ class GridStrikeSettings(BaseModel):
     grid_spacing: float = 120.0
     take_profit_spacing: float = 120.0
     stop_loss_spacing: float = 60.0
+    atr_period: int = 14
+    atr_spacing_multiplier: float = 1.25
+    session_start_hour_utc: int = 6
+    session_end_hour_utc: int = 22
+    max_spread_pips: float = 0.0
     symbol_lots: dict[str, float] = Field(default_factory=dict)
 
     def get_lots(self, symbol: str) -> float:
@@ -90,6 +97,11 @@ class Mt5WorkerSettings(BaseModel):
     comment_prefix: str = "vps_forex_brain"
     auto_close_enabled: bool = True
     auto_close_profit_pct: float = 3.0
+    auto_close_loss_pct: float = 1.5
+    basket_take_profit_usd: float = 0.0
+    stale_position_minutes: int = 0
+    volatility_spike_close_pct: float = 0.0
+    reentry_cooldown_seconds: int = 0
     auto_reopen_after_close: bool = True
 
 

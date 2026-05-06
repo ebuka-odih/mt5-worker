@@ -53,6 +53,19 @@ def test_grid_strike_plan_endpoint_builds_plan_for_best_candidate(monkeypatch) -
     assert len(plan["sell_levels"]) == server.settings.grid_strike.levels_each_side
 
 
+def test_grid_strike_scan_all_returns_rejected_candidates_too(monkeypatch) -> None:
+    monkeypatch.setattr(server, "provider", FakeProvider())
+    monkeypatch.setattr(server.settings.market_data, "symbols", ["EURUSD", "USDJPY"])
+    monkeypatch.setattr(server.settings, "grid_strike", GridStrikeSettings())
+
+    response = TestClient(server.app).post("/api/grid-strike/scan-all")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 2
+    assert {item["symbol"] for item in body} == {"EURUSD", "USDJPY"}
+
+
 def test_worker_ping_accepts_query_token(monkeypatch) -> None:
     monkeypatch.setattr(server.settings.api, "worker_token", "test-token")
 

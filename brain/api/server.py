@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
@@ -13,7 +14,8 @@ from starlette.responses import PlainTextResponse
 
 from brain.data.bybit_data import BybitMarketDataProvider, BybitWebhookCache
 from brain.data.forex_data import YFinanceForexProvider
-from brain.signals.grid_strike import GridPlan, GridStrikeCandidate, build_grid_plan, scan_grid_candidates
+from brain.risk.funded_challenge import AccountRiskSnapshot, PositionExposure, evaluate_entry_guard
+from brain.signals.grid_strike import GridPlan, GridStrikeCandidate, build_grid_plan, score_grid_candidate
 from brain.signals.simple_strategy import simple_signal
 from shared.models import ExecutionReport, ForexQuote, Signal, SignalAction, SignalSide, SignalStatus, WorkerHeartbeat, WorkerPosition
 from shared.settings import load_settings
@@ -47,6 +49,10 @@ class VirtualPosition:
 
 
 VIRTUAL_POSITIONS: Dict[str, VirtualPosition] = {}
+LAST_CLOSE_TIMES: Dict[str, datetime] = {}
+ENTRY_BLOCK_COUNTS: Counter[str] = Counter()
+GRID_REJECTION_COUNTS: Counter[str] = Counter()
+CLOSE_REASON_COUNTS: Counter[str] = Counter()
 SCAN_STOP_EVENT = threading.Event()
 SCAN_THREAD: Optional[threading.Thread] = None
 
@@ -81,18 +87,100 @@ def _has_pending_signal_locked(symbol: str) -> bool:
     )
 
 
+def _bump_counter_locked(counter: Counter[str], reason: str) -> None:
+    if reason:
+        counter[reason] += 1
+
+
+def _bucket_reason(reason: str) -> str:
+    if not reason:
+        return "unknown"
+    return reason.split(":", 1)[0].strip()
+
+
+def _cooldown_remaining_seconds_locked(symbol: str) -> int:
+    last_close = LAST_CLOSE_TIMES.get(symbol)
+    cooldown_seconds = max(int(settings.mt5_worker.reentry_cooldown_seconds), 0)
+    if not last_close or cooldown_seconds <= 0:
+        return 0
+    elapsed = (datetime.now(timezone.utc) - last_close).total_seconds()
+    return max(int(cooldown_seconds - elapsed), 0)
+
+
+def _basket_net_profit(worker: WorkerHeartbeat) -> float:
+    return round(sum(position.net_profit for position in worker.positions), 2)
+
+
 def _should_enqueue_signal_locked(signal: Signal) -> bool:
     if signal.action == SignalAction.CLOSE:
         return True
     symbol = _symbol_key(signal.symbol)
     if _has_pending_signal_locked(symbol):
+        _bump_counter_locked(ENTRY_BLOCK_COUNTS, "pending-signal")
+        return False
+    if _cooldown_remaining_seconds_locked(symbol) > 0:
+        _bump_counter_locked(ENTRY_BLOCK_COUNTS, "reentry-cooldown")
+        logger.info("entry blocked for %s by cooldown", symbol)
         return False
     current = VIRTUAL_POSITIONS.get(symbol)
     if current is None:
+        guard = _entry_guard_locked(signal)
+        if not guard.allowed:
+            _bump_counter_locked(ENTRY_BLOCK_COUNTS, _bucket_reason(guard.reason))
+            logger.info("entry blocked for %s:%s - %s", signal.symbol, signal.side.value, guard.reason)
+            return False
         return True
     # Keep one directional exposure per symbol. Opposite side is allowed to
     # flip (close existing and reopen new direction on netting accounts).
-    return current.side != signal.side
+    if current.side == signal.side:
+        _bump_counter_locked(ENTRY_BLOCK_COUNTS, "same-side-virtual-position")
+        return False
+    guard = _entry_guard_locked(signal)
+    if not guard.allowed:
+        _bump_counter_locked(ENTRY_BLOCK_COUNTS, _bucket_reason(guard.reason))
+        logger.info("entry blocked for %s:%s - %s", signal.symbol, signal.side.value, guard.reason)
+        return False
+    return True
+
+
+def _position_exposures_from_heartbeats_locked() -> list[PositionExposure]:
+    exposures: list[PositionExposure] = []
+    for heartbeat in HEARTBEATS.values():
+        for position in heartbeat.positions:
+            exposures.append(
+                PositionExposure(
+                    symbol=_symbol_key(position.symbol),
+                    side=position.side.value,
+                    lots=float(position.lots),
+                    entry_price=position.entry_price,
+                    current_price=position.current_price,
+                )
+            )
+    return exposures
+
+
+def _risk_snapshot_locked() -> AccountRiskSnapshot:
+    latest_heartbeat = max(HEARTBEATS.values(), key=lambda hb: hb.timestamp, default=None)
+    balance = float(latest_heartbeat.balance) if latest_heartbeat and latest_heartbeat.balance is not None else settings.risk.starting_balance
+    equity = float(latest_heartbeat.equity) if latest_heartbeat and latest_heartbeat.equity is not None else balance
+
+    positions = _position_exposures_from_heartbeats_locked()
+    if not positions:
+        positions = [
+            PositionExposure(symbol=symbol, side=position.side.value, lots=float(position.lots))
+            for symbol, position in VIRTUAL_POSITIONS.items()
+        ]
+
+    return AccountRiskSnapshot(balance=balance, equity=equity, positions=positions)
+
+
+def _entry_guard_locked(signal: Signal):
+    return evaluate_entry_guard(
+        symbol=_symbol_key(signal.symbol),
+        side=signal.side.value,
+        snapshot=_risk_snapshot_locked(),
+        risk=settings.risk,
+    )
 
 
 def _position_profit_pct(position: WorkerPosition) -> Optional[float]:
@@ -103,6 +191,17 @@ def _position_profit_pct(position: WorkerPosition) -> Optional[float]:
     if position.side == SignalSide.BUY:
         return ((current - entry) / entry) * 100.0
     return ((entry - current) / entry) * 100.0
+
+
+def _position_net_profit(position: WorkerPosition) -> float:
+    return position.net_profit
+
+
+def _position_age_minutes(position: WorkerPosition) -> Optional[float]:
+    if position.opened_at is None:
+        return None
+    opened_at = position.opened_at if position.opened_at.tzinfo else position.opened_at.replace(tzinfo=timezone.utc)
+    return max((datetime.now(timezone.utc) - opened_at).total_seconds() / 60.0, 0.0)
 
 
 def _has_pending_close_signal_locked(worker_id: str, ticket: int) -> bool:
@@ -124,14 +223,38 @@ def _enqueue_auto_close_signals_locked(worker_id: str, profit_pct: float) -> lis
         return []
 
     created: list[Signal] = []
+    basket_net_profit = sum(_position_net_profit(position) for position in worker.positions)
+    basket_take_profit = max(float(settings.mt5_worker.basket_take_profit_usd), 0.0)
+    emergency_pct = max(float(settings.mt5_worker.volatility_spike_close_pct), 0.0)
+    stale_minutes = max(int(settings.mt5_worker.stale_position_minutes), 0)
+    close_loss_pct = max(float(settings.mt5_worker.auto_close_loss_pct), 0.0)
     for position in worker.positions:
         if position.ticket is None:
             continue
         position_profit_pct = _position_profit_pct(position)
-        if position_profit_pct is None or position_profit_pct < profit_pct:
+        if position_profit_pct is None:
             continue
         ticket = int(position.ticket)
         if _has_pending_close_signal_locked(worker_id, ticket):
+            continue
+
+        close_reason: Optional[str] = None
+        net_profit = _position_net_profit(position)
+        age_minutes = _position_age_minutes(position)
+        adverse_move_pct = max(-position_profit_pct, 0.0)
+
+        if position_profit_pct >= profit_pct:
+            close_reason = f"net-tp-hit:{position_profit_pct:.4f}% >= {profit_pct:.4f}%"
+        elif close_loss_pct > 0 and adverse_move_pct >= close_loss_pct:
+            close_reason = f"net-sl-hit:{adverse_move_pct:.4f}% >= {close_loss_pct:.4f}%"
+        elif basket_take_profit > 0 and basket_net_profit >= basket_take_profit:
+            close_reason = f"basket-tp-hit:{basket_net_profit:.2f} >= {basket_take_profit:.2f}"
+        elif stale_minutes > 0 and age_minutes is not None and age_minutes >= stale_minutes:
+            close_reason = f"stale-exit:{age_minutes:.1f}m >= {stale_minutes}m"
+        elif emergency_pct > 0 and adverse_move_pct >= emergency_pct:
+            close_reason = f"volatility-spike:{adverse_move_pct:.4f}% >= {emergency_pct:.4f}%"
+
+        if close_reason is None:
             continue
 
         close_side = SignalSide.SELL if position.side == SignalSide.BUY else SignalSide.BUY
@@ -142,10 +265,20 @@ def _enqueue_auto_close_signals_locked(worker_id: str, profit_pct: float) -> lis
             lots=float(position.lots),
             position_ticket=ticket,
             confidence=1.0,
-            reason=f"auto-close-profit: {position_profit_pct:.4f}% >= {profit_pct:.4f}%",
+            reason=f"auto-close:{close_reason}; net_pnl={net_profit:.2f}",
+            close_reason=close_reason,
             target_worker_id=worker_id,
         )
         SIGNALS[close_signal.id] = close_signal
+        _bump_counter_locked(CLOSE_REASON_COUNTS, _bucket_reason(close_reason))
+        logger.info(
+            "auto-close queued worker=%s symbol=%s ticket=%s reason=%s basket_net_pnl=%.2f",
+            worker_id,
+            position.symbol,
+            ticket,
+            close_reason,
+            basket_net_profit,
+        )
         created.append(close_signal)
     return created
 
@@ -155,6 +288,7 @@ def _enqueue_reopen_after_close_locked(signal: Signal, report: ExecutionReport) 
         return None
     if report.status != SignalStatus.FILLED:
         return None
+    LAST_CLOSE_TIMES[_symbol_key(signal.symbol)] = report.reported_at
     if not settings.mt5_worker.auto_reopen_after_close:
         return None
 
@@ -256,6 +390,11 @@ def _run_strategy_scan_once() -> list[Signal]:
 
             signal.symbol = _symbol_key(signal.symbol)
             with STATE_LOCK:
+                guard = _entry_guard_locked(signal)
+                if not guard.allowed:
+                    _bump_counter_locked(ENTRY_BLOCK_COUNTS, _bucket_reason(guard.reason))
+                    logger.info("scan skipped %s:%s - %s", signal.symbol, signal.side.value, guard.reason)
+                    continue
                 if not _should_enqueue_signal_locked(signal):
                     continue
                 SIGNALS[signal.id] = signal
@@ -372,7 +511,22 @@ def grid_strike_scan() -> list[GridStrikeCandidate]:
     """Rank currency pairs that currently look suitable for grid scalping."""
     if not settings.grid_strike.enabled:
         return []
-    return scan_grid_candidates(_load_grid_strike_candles(), settings.grid_strike)
+    all_candidates = [score_grid_candidate(symbol, candles, settings.grid_strike) for symbol, candles in _load_grid_strike_candles().items()]
+    for candidate in all_candidates:
+        if not candidate.tradeable:
+            reason = candidate.reason or "not-tradeable"
+            _bump_counter_locked(GRID_REJECTION_COUNTS, _bucket_reason(reason))
+            logger.info("grid candidate rejected symbol=%s reason=%s", candidate.symbol, reason)
+    tradeable = [candidate for candidate in all_candidates if candidate.tradeable]
+    return sorted(tradeable, key=lambda candidate: candidate.score, reverse=True)
+
+
+@app.post("/api/grid-strike/scan-all", response_model=list[GridStrikeCandidate])
+def grid_strike_scan_all() -> list[GridStrikeCandidate]:
+    if not settings.grid_strike.enabled:
+        return []
+    candidates = [score_grid_candidate(symbol, candles, settings.grid_strike) for symbol, candles in _load_grid_strike_candles().items()]
+    return sorted(candidates, key=lambda candidate: candidate.score, reverse=True)
 
 
 @app.post("/api/grid-strike/plan", response_model=Optional[GridPlan])
@@ -403,6 +557,9 @@ def create_signal_from_grid(req: CreateSignalRequest = Body(...)) -> Signal:
         target_worker_id=req.target_worker_id,
     )
     with STATE_LOCK:
+        guard = _entry_guard_locked(signal)
+        if signal.action == SignalAction.OPEN and not guard.allowed:
+            raise HTTPException(status_code=409, detail=guard.reason)
         SIGNALS[signal.id] = signal
     return signal
 
@@ -444,6 +601,7 @@ def list_orders(
                     "action": signal.action.value if signal else None,
                     "position_ticket": signal.position_ticket if signal else None,
                     "reason": signal.reason if signal else None,
+                    "close_reason": signal.close_reason if signal else None,
                 }
             )
             if len(rows) >= limit:
@@ -455,6 +613,61 @@ def list_orders(
 def list_workers(_: None = Depends(require_worker_token)) -> list[WorkerHeartbeat]:
     with STATE_LOCK:
         return sorted(HEARTBEATS.values(), key=lambda hb: hb.timestamp, reverse=True)
+
+
+@app.get("/api/diagnostics/summary")
+def diagnostics_summary(_: None = Depends(require_worker_token)) -> dict[str, Any]:
+    with STATE_LOCK:
+        workers = [
+            {
+                "worker_id": worker.worker_id,
+                "basket_net_pnl": _basket_net_profit(worker),
+                "open_positions": len(worker.positions),
+                "equity": worker.equity,
+                "balance": worker.balance,
+                "last_heartbeat": worker.timestamp.isoformat(),
+            }
+            for worker in sorted(HEARTBEATS.values(), key=lambda hb: hb.timestamp, reverse=True)
+        ]
+        cooldowns = {
+            symbol: {
+                "last_close_at": last_close.isoformat(),
+                "cooldown_remaining_seconds": _cooldown_remaining_seconds_locked(symbol),
+            }
+            for symbol, last_close in LAST_CLOSE_TIMES.items()
+        }
+        return {
+            "time": datetime.now(timezone.utc).isoformat(),
+            "entry_block_counts": dict(ENTRY_BLOCK_COUNTS),
+            "grid_rejection_counts": dict(GRID_REJECTION_COUNTS),
+            "close_reason_counts": dict(CLOSE_REASON_COUNTS),
+            "cooldowns": cooldowns,
+            "workers": workers,
+        }
+
+
+@app.get("/api/workers/{worker_id}/diagnostics")
+def worker_diagnostics(worker_id: str, _: None = Depends(require_worker_token)) -> dict[str, Any]:
+    with STATE_LOCK:
+        worker = HEARTBEATS.get(worker_id)
+    if worker is None:
+        raise HTTPException(status_code=404, detail="worker not found")
+
+    return {
+        "worker_id": worker.worker_id,
+        "basket_net_pnl": _basket_net_profit(worker),
+        "positions": [
+            {
+                "ticket": position.ticket,
+                "symbol": position.symbol,
+                "side": position.side.value,
+                "net_profit": position.net_profit,
+                "profit_pct": _position_profit_pct(position),
+                "age_minutes": _position_age_minutes(position),
+            }
+            for position in worker.positions
+        ],
+    }
 
 
 @app.get("/api/workers/{worker_id}", response_model=WorkerHeartbeat)
@@ -586,6 +799,8 @@ def heartbeat_ping(
             open_positions=max(open_positions, len(positions)),
             positions=positions,
         )
+        if mt5_connected and settings.mt5_worker.auto_close_enabled:
+            _enqueue_auto_close_signals_locked(worker_id, settings.mt5_worker.auto_close_profit_pct)
     return "ok"
 
 

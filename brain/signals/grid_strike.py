@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Mapping, Optional
 
 import pandas as pd
@@ -27,6 +27,15 @@ class GridStrikeSettings(BaseModel):
     grid_spacing: float = 120.0
     take_profit_spacing: float = 120.0
     stop_loss_spacing: float = 60.0
+    atr_period: int = 14
+    atr_spacing_multiplier: float = 1.25
+    session_start_hour_utc: int = 6
+    session_end_hour_utc: int = 22
+    max_spread_pips: float = 0.0
+    symbol_lots: dict[str, float] = Field(default_factory=dict)
+
+    def get_lots(self, symbol: str) -> float:
+        return self.symbol_lots.get(symbol.upper(), self.order_lots)
 
 
 class GridLevel(BaseModel):
@@ -44,6 +53,8 @@ class GridStrikeCandidate(BaseModel):
     mid_price: float
     range_pct: float
     trend_ratio: float
+    atr_pips: float = 0.0
+    spread_pips: float = 0.0
     grid_spacing_pips: float
     reason: str
 
@@ -73,6 +84,60 @@ def _round_price(symbol: str, price: float) -> float:
     if normalized.startswith(("BTC", "XBT")):
         return round(price, 2)
     return round(price, 3 if normalized.endswith("JPY") else 5)
+
+
+def _atr_pips(symbol: str, candles: pd.DataFrame, period: int) -> float:
+    high = candles["High"].astype(float)
+    low = candles["Low"].astype(float)
+    close = candles["Close"].astype(float)
+    prev_close = close.shift(1)
+    true_range = pd.concat(
+        [
+            (high - low),
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    atr = float(true_range.tail(max(period, 1)).mean()) if not true_range.empty else 0.0
+    return atr / max(pip_size(symbol), 1e-9)
+
+
+def _latest_spread_pips(symbol: str, candles: pd.DataFrame) -> float:
+    if "SpreadPips" in candles.columns:
+        spread = float(candles["SpreadPips"].dropna().iloc[-1])
+        return max(spread, 0.0)
+    if {"Bid", "Ask"}.issubset(candles.columns):
+        bid = float(candles["Bid"].dropna().iloc[-1])
+        ask = float(candles["Ask"].dropna().iloc[-1])
+        return max((ask - bid) / max(pip_size(symbol), 1e-9), 0.0)
+    return 0.0
+
+
+def _latest_timestamp(candles: pd.DataFrame) -> datetime | None:
+    if candles.empty:
+        return None
+    last_idx = candles.index[-1]
+    if isinstance(last_idx, pd.Timestamp):
+        ts = last_idx.to_pydatetime()
+        return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+    if "Timestamp" in candles.columns:
+        ts = pd.Timestamp(candles["Timestamp"].iloc[-1]).to_pydatetime()
+        return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+    return None
+
+
+def _within_session(ts: datetime | None, settings: GridStrikeSettings) -> bool:
+    if ts is None:
+        return True
+    hour = ts.astimezone(timezone.utc).hour
+    start = settings.session_start_hour_utc
+    end = settings.session_end_hour_utc
+    if start == end:
+        return True
+    if start < end:
+        return start <= hour < end
+    return hour >= start or hour < end
 
 
 def score_grid_candidate(
@@ -110,8 +175,12 @@ def score_grid_candidate(
     directional_move = abs(float(close.tail(window).mean()) - float(close.head(window).mean()))
     trend_ratio = min(1.0, directional_move / raw_range) if raw_range > 0 else 1.0
 
-    # Use fixed grid spacing from settings (validated on 42d backtest)
-    spacing_pips = settings.grid_spacing
+    atr_pips = _atr_pips(symbol, candles.tail(settings.lookback_candles), settings.atr_period)
+    adaptive_spacing = atr_pips * max(settings.atr_spacing_multiplier, 0.0)
+    spacing_pips = adaptive_spacing if adaptive_spacing > 0 else settings.grid_spacing
+    spacing_pips = max(settings.min_spacing_pips, min(settings.max_spacing_pips, spacing_pips))
+    spread_pips = _latest_spread_pips(symbol, candles)
+    in_session = _within_session(_latest_timestamp(candles), settings)
 
     reasons: list[str] = []
     if range_pct < settings.min_range_pct:
@@ -120,15 +189,25 @@ def score_grid_candidate(
         reasons.append(f"range too wide ({range_pct:.3f}% > {settings.max_range_pct:.3f}%)")
     if trend_ratio > settings.max_trend_ratio:
         reasons.append(f"trend too one-sided ({trend_ratio:.2f} > {settings.max_trend_ratio:.2f})")
+    if not in_session:
+        reasons.append("outside configured session window")
+    if settings.max_spread_pips > 0 and spread_pips > settings.max_spread_pips:
+        reasons.append(f"spread too wide ({spread_pips:.2f} > {settings.max_spread_pips:.2f} pips)")
 
     range_score = min(1.0, range_pct / max(settings.min_range_pct * 3, 0.0001))
     trend_score = max(0.0, 1.0 - (trend_ratio / max(settings.max_trend_ratio, 0.0001)))
     spacing_score = 1.0 if settings.min_spacing_pips <= spacing_pips <= settings.max_spacing_pips else 0.5
-    score = round((range_score * 0.45) + (trend_score * 0.45) + (spacing_score * 0.10), 3)
+    spread_score = 1.0
+    if settings.max_spread_pips > 0:
+        spread_score = max(0.0, 1.0 - (spread_pips / max(settings.max_spread_pips, 0.0001)))
+    score = round((range_score * 0.40) + (trend_score * 0.35) + (spacing_score * 0.15) + (spread_score * 0.10), 3)
 
     tradeable = not reasons and score >= settings.min_score
     regime = "range" if tradeable else ("trend" if trend_ratio > settings.max_trend_ratio else "no_trade")
-    reason = "; ".join(reasons) if reasons else f"scalpable range: range={range_pct:.3f}%, trend_ratio={trend_ratio:.2f}, spacing={spacing_pips:.1f} pips"
+    reason = "; ".join(reasons) if reasons else (
+        f"scalpable range: range={range_pct:.3f}%, trend_ratio={trend_ratio:.2f}, "
+        f"atr={atr_pips:.1f} pips, spread={spread_pips:.1f} pips, spacing={spacing_pips:.1f} pips"
+    )
 
     return GridStrikeCandidate(
         symbol=symbol.upper(),
@@ -138,6 +217,8 @@ def score_grid_candidate(
         mid_price=_round_price(symbol, last),
         range_pct=round(range_pct, 4),
         trend_ratio=round(trend_ratio, 4),
+        atr_pips=round(atr_pips, 2),
+        spread_pips=round(spread_pips, 2),
         grid_spacing_pips=round(spacing_pips, 2),
         reason=reason,
     )
