@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -71,6 +73,49 @@ def test_worker_state_endpoints_expose_position_details() -> None:
     assert len(positions) == 1
     assert positions[0]["ticket"] == 99887766
     assert positions[0]["profit"] == 12.5
+
+
+def test_heartbeat_ping_accepts_positions_json_payload() -> None:
+    client = TestClient(server.app)
+    positions_payload = [
+        {
+            "ticket": 44556677,
+            "symbol": "ETHUSD",
+            "side": "sell",
+            "lots": 0.1,
+            "entry_price": 2500.0,
+            "current_price": 2480.0,
+            "profit": 20.0,
+            "swap": 0.0,
+            "opened_at": 1715000000,
+            "magic": 552501,
+            "comment": "bridge-ea",
+        }
+    ]
+    resp = client.get(
+        "/api/worker/heartbeat-ping",
+        params={
+            **_token_param(),
+            "worker_id": "windows-mt5-atlas-01",
+            "mt5_connected": "true",
+            "account_login": 123456,
+            "broker": "AtlasFunded",
+            "balance": 400000.0,
+            "equity": 401000.0,
+            "open_positions": 1,
+            "positions_json": json.dumps(positions_payload),
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.text == "ok"
+
+    positions_resp = client.get("/api/workers/windows-mt5-atlas-01/positions", params=_token_param())
+    assert positions_resp.status_code == 200
+    positions = positions_resp.json()
+    assert len(positions) == 1
+    assert positions[0]["ticket"] == 44556677
+    assert positions[0]["symbol"] == "ETHUSD"
+    assert positions[0]["side"] == "sell"
 
 
 def test_worker_state_endpoints_return_404_for_unknown_worker() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from dataclasses import dataclass
@@ -172,6 +173,31 @@ def _enqueue_reopen_after_close_locked(signal: Signal, report: ExecutionReport) 
         return None
     SIGNALS[reopen_signal.id] = reopen_signal
     return reopen_signal
+
+
+def _parse_positions_json(raw_payload: Optional[str]) -> list[WorkerPosition]:
+    if not raw_payload:
+        return []
+    try:
+        payload = json.loads(raw_payload)
+    except Exception as exc:
+        logger.warning("heartbeat-ping positions_json parse failed: %s", exc)
+        return []
+
+    if not isinstance(payload, list):
+        logger.warning("heartbeat-ping positions_json is not a list")
+        return []
+
+    positions: list[WorkerPosition] = []
+    for idx, row in enumerate(payload):
+        if not isinstance(row, dict):
+            logger.warning("heartbeat-ping positions_json row[%d] ignored (not object)", idx)
+            continue
+        try:
+            positions.append(WorkerPosition.model_validate(row))
+        except Exception as exc:
+            logger.warning("heartbeat-ping positions_json row[%d] validation failed: %s", idx, exc)
+    return positions
 
 
 def _update_virtual_position_on_fill(report: ExecutionReport, signal: Signal) -> None:
@@ -545,8 +571,10 @@ def heartbeat_ping(
     balance: Optional[float] = None,
     equity: Optional[float] = None,
     open_positions: int = 0,
+    positions_json: Optional[str] = None,
     _: None = Depends(require_worker_token),
 ) -> str:
+    positions = _parse_positions_json(positions_json)
     with STATE_LOCK:
         HEARTBEATS[worker_id] = WorkerHeartbeat(
             worker_id=worker_id,
@@ -555,7 +583,8 @@ def heartbeat_ping(
             broker=broker,
             balance=balance,
             equity=equity,
-            open_positions=open_positions,
+            open_positions=max(open_positions, len(positions)),
+            positions=positions,
         )
     return "ok"
 
