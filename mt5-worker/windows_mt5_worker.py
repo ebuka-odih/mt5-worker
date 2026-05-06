@@ -314,7 +314,7 @@ def execute_signal(signal: dict[str, Any]) -> None:
             return
         positions = mt5.positions_get(ticket=int(position_ticket)) or []
         if not positions:
-            report(signal_id, "rejected", f"position not found for ticket={position_ticket}")
+            report(signal_id, "rejected", f"Position {position_ticket} not found")
             return
         position = positions[0]
         symbol = getattr(position, "symbol", symbol)
@@ -339,7 +339,7 @@ def execute_signal(signal: dict[str, Any]) -> None:
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": symbol,
-            "volume": min(lots, float(getattr(position, "volume", lots))),
+            "volume": float(getattr(position, "volume", lots)),
             "type": order_type,
             "position": int(position_ticket),
             "price": price,
@@ -388,6 +388,16 @@ def execute_signal(signal: dict[str, Any]) -> None:
         return
 
     logger.info(f"Order filled: {signal_id} -> order_id={result.order}, price={price}")
+    if action == "close":
+        report(
+            signal_id,
+            "filled",
+            "MT5 position closed",
+            broker_order_id=str(result.order),
+            executed_price=price,
+            lots=float(request.get("volume", lots)),
+        )
+        return
     report(signal_id, "filled", "MT5 order filled", broker_order_id=str(result.order), executed_price=price, lots=float(signal["lots"]))
 
 

@@ -118,6 +118,34 @@ def test_heartbeat_ping_accepts_positions_json_payload() -> None:
     assert positions[0]["side"] == "sell"
 
 
+def test_next_signal_plain_includes_action_and_position_ticket() -> None:
+    client = TestClient(server.app)
+    created = client.post(
+        "/api/signals/create",
+        json={
+            "symbol": "BTCUSD",
+            "side": "sell",
+            "action": "close",
+            "lots": 0.01,
+            "position_ticket": 777001,
+            "target_worker_id": "windows-mt5-atlas-01",
+        },
+    )
+    assert created.status_code == 200
+    signal_id = created.json()["id"]
+
+    plain = client.get(
+        "/api/worker/next-signal-plain",
+        params={**_token_param(), "worker_id": "windows-mt5-atlas-01"},
+    )
+    assert plain.status_code == 200
+    parts = plain.text.split("|")
+    assert len(parts) >= 8
+    assert parts[0] == signal_id
+    assert parts[6] == "close"
+    assert parts[7] == "777001"
+
+
 def test_worker_state_endpoints_return_404_for_unknown_worker() -> None:
     client = TestClient(server.app)
     response = client.get("/api/workers/not-found-worker/positions", params=_token_param())

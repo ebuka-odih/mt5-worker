@@ -521,6 +521,7 @@ def next_signal_plain(worker_id: str, _: None = Depends(require_worker_token)) -
         return ""
     stop_loss = "" if signal.stop_loss is None else str(signal.stop_loss)
     take_profit = "" if signal.take_profit is None else str(signal.take_profit)
+    position_ticket = "" if signal.position_ticket is None else str(signal.position_ticket)
     return "|".join(
         [
             signal.id,
@@ -529,6 +530,8 @@ def next_signal_plain(worker_id: str, _: None = Depends(require_worker_token)) -
             str(signal.lots),
             stop_loss,
             take_profit,
+            signal.action.value,
+            position_ticket,
         ]
     )
 

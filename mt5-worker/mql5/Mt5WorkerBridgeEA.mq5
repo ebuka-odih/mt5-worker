@@ -269,7 +269,17 @@ bool ReportStatus(string signal_id, string status_value, string message, double 
    return status >= 200 && status < 300;
   }
 
-bool ParseSignalLine(string line, string &signal_id, string &symbol, string &side, double &lots, double &stop_loss, double &take_profit)
+bool ParseSignalLine(
+   string line,
+   string &signal_id,
+   string &symbol,
+   string &side,
+   double &lots,
+   double &stop_loss,
+   double &take_profit,
+   string &action,
+   long &position_ticket
+)
   {
    string parts[];
    int count = StringSplit(line, '|', parts);
@@ -282,17 +292,101 @@ bool ParseSignalLine(string line, string &signal_id, string &symbol, string &sid
    lots = StringToDouble(parts[3]);
    stop_loss = parts[4] == "" ? 0.0 : StringToDouble(parts[4]);
    take_profit = parts[5] == "" ? 0.0 : StringToDouble(parts[5]);
-   return signal_id != "" && symbol != "" && side != "" && lots > 0.0;
+   action = count > 6 && parts[6] != "" ? StringToLower(parts[6]) : "open";
+   position_ticket = (count > 7 && parts[7] != "") ? (long)StringToInteger(parts[7]) : 0;
+
+   return signal_id != "" && symbol != "" && side != "" && lots > 0.0 && (action == "open" || action == "close");
   }
 
-void ExecuteSignal(string signal_id, string symbol, string side, double lots, double stop_loss, double take_profit)
+bool ExecuteCloseByTicket(string signal_id, long position_ticket)
   {
-   Print("Received signal: id=", signal_id, " symbol=", symbol, " side=", side, " lots=", DoubleToString(lots, 2));
+   if(position_ticket <= 0)
+     {
+      ReportStatus(signal_id, "rejected", "close signal missing position_ticket");
+      return false;
+     }
+
+   ulong ticket = (ulong)position_ticket;
+   if(!PositionSelectByTicket(ticket))
+     {
+      ReportStatus(signal_id, "rejected", StringFormat("Position %I64d not found", position_ticket));
+      return false;
+     }
+
+   string position_symbol = PositionGetString(POSITION_SYMBOL);
+   long position_type = PositionGetInteger(POSITION_TYPE);
+   double position_volume = PositionGetDouble(POSITION_VOLUME);
+
+   if(!SymbolSelect(position_symbol, true))
+     {
+      ReportStatus(signal_id, "rejected", "symbol_select failed", position_volume);
+      return false;
+     }
+
+   MqlTick tick;
+   if(!SymbolInfoTick(position_symbol, tick))
+     {
+      ReportStatus(signal_id, "rejected", "no tick", position_volume);
+      return false;
+     }
+
+   ENUM_ORDER_TYPE close_type = position_type == POSITION_TYPE_BUY ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+   double price = close_type == ORDER_TYPE_SELL ? tick.bid : tick.ask;
+
+   MqlTradeRequest request;
+   MqlTradeResult result;
+   ZeroMemory(request);
+   ZeroMemory(result);
+
+   request.action = TRADE_ACTION_DEAL;
+   request.symbol = position_symbol;
+   request.volume = position_volume;
+   request.type = close_type;
+   request.position = ticket;
+   request.price = price;
+   request.deviation = 20;
+   request.magic = g_magic_number;
+   request.comment = "vps_forex_close";
+   request.type_time = ORDER_TIME_GTC;
+   request.type_filling = ORDER_FILLING_IOC;
+
+   if(!OrderSend(request, result))
+     {
+      ReportStatus(signal_id, "rejected", StringFormat("OrderSend failed: %d", GetLastError()), position_volume);
+      return false;
+     }
+
+   if(result.retcode != TRADE_RETCODE_DONE)
+     {
+      ReportStatus(signal_id, "rejected", StringFormat("MT5 retcode=%I64d, comment=%s", result.retcode, result.comment), position_volume);
+      return false;
+     }
+
+   ReportStatus(
+      signal_id,
+      "filled",
+      "MT5 position closed",
+      position_volume,
+      IntegerToString((int)result.order),
+      result.price
+   );
+   return true;
+  }
+
+void ExecuteSignal(string signal_id, string symbol, string side, double lots, double stop_loss, double take_profit, string action, long position_ticket)
+  {
+   Print("Received signal: id=", signal_id, " action=", action, " symbol=", symbol, " side=", side, " lots=", DoubleToString(lots, 2), " ticket=", position_ticket);
 
    if(g_dry_run)
      {
-      Print("[DRY_RUN] Would execute signal ", signal_id, ": ", side, " ", DoubleToString(lots, 2), " ", symbol);
+      Print("[DRY_RUN] Would execute signal ", signal_id, ": action=", action, " side=", side, " lots=", DoubleToString(lots, 2), " symbol=", symbol, " ticket=", position_ticket);
       ReportStatus(signal_id, "filled", "DRY_RUN accepted signal; no MT5 order sent", lots);
+      return;
+     }
+
+   if(action == "close")
+     {
+      ExecuteCloseByTicket(signal_id, position_ticket);
       return;
      }
 
@@ -339,14 +433,15 @@ void PollSignal()
    if(status < 200 || status >= 300 || response == "")
       return;
 
-   string signal_id, symbol, side;
+   string signal_id, symbol, side, action;
+   long position_ticket = 0;
    double lots = 0.0, stop_loss = 0.0, take_profit = 0.0;
-   if(!ParseSignalLine(response, signal_id, symbol, side, lots, stop_loss, take_profit))
+   if(!ParseSignalLine(response, signal_id, symbol, side, lots, stop_loss, take_profit, action, position_ticket))
      {
       Print("Unable to parse signal payload: ", response);
       return;
      }
-   ExecuteSignal(signal_id, symbol, side, lots, stop_loss, take_profit);
+   ExecuteSignal(signal_id, symbol, side, lots, stop_loss, take_profit, action, position_ticket);
   }
 
 int OnInit()
