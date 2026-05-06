@@ -4,7 +4,7 @@ app:
   timezone: UTC
 
 api:
-  host: 0.0.0.0
+  host: 127.0.0.1
   port: 8780
   worker_token: 991403c231352264deb0d3e949324189eff63f08ede89901d0dc22a3e152a693
 
@@ -80,3 +80,6 @@ mt5_worker:
     - limit
   magic_number: 552501
   comment_prefix: vps_forex_brain
+  auto_close_enabled: true
+  auto_close_profit_pct: 3.0
+  auto_reopen_after_close: true
