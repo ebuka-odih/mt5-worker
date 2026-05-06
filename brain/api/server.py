@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel
@@ -14,7 +15,7 @@ from brain.data.bybit_data import BybitMarketDataProvider, BybitWebhookCache
 from brain.data.forex_data import YFinanceForexProvider
 from brain.signals.grid_strike import GridPlan, GridStrikeCandidate, build_grid_plan, scan_grid_candidates
 from brain.signals.simple_strategy import simple_signal
-from shared.models import ExecutionReport, ForexQuote, Signal, SignalSide, SignalStatus, WorkerHeartbeat
+from shared.models import ExecutionReport, ForexQuote, Signal, SignalAction, SignalSide, SignalStatus, WorkerHeartbeat, WorkerPosition
 from shared.settings import load_settings
 
 settings = load_settings()
@@ -53,9 +54,12 @@ SCAN_THREAD: Optional[threading.Thread] = None
 class CreateSignalRequest(BaseModel):
     symbol: str
     side: str = "buy"
-    lots: float = 0.01
+    action: str = "open"
+    lots: Optional[float] = None
+    position_ticket: Optional[int] = None
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
+    target_worker_id: Optional[str] = None
 
 
 class BybitWebhookPayload(BaseModel):
@@ -78,6 +82,8 @@ def _has_pending_signal_locked(symbol: str) -> bool:
 
 
 def _should_enqueue_signal_locked(signal: Signal) -> bool:
+    if signal.action == SignalAction.CLOSE:
+        return True
     symbol = _symbol_key(signal.symbol)
     if _has_pending_signal_locked(symbol):
         return False
@@ -87,6 +93,111 @@ def _should_enqueue_signal_locked(signal: Signal) -> bool:
     # Keep one directional exposure per symbol. Opposite side is allowed to
     # flip (close existing and reopen new direction on netting accounts).
     return current.side != signal.side
+
+
+def _position_profit_pct(position: WorkerPosition) -> Optional[float]:
+    if position.entry_price in (None, 0.0) or position.current_price is None:
+        return None
+    entry = float(position.entry_price)
+    current = float(position.current_price)
+    if position.side == SignalSide.BUY:
+        return ((current - entry) / entry) * 100.0
+    return ((entry - current) / entry) * 100.0
+
+
+def _has_pending_close_signal_locked(worker_id: str, ticket: int) -> bool:
+    for signal in SIGNALS.values():
+        if signal.action != SignalAction.CLOSE:
+            continue
+        if signal.position_ticket != ticket:
+            continue
+        if signal.target_worker_id not in (None, worker_id):
+            continue
+        if signal.status in {SignalStatus.CREATED, SignalStatus.CLAIMED, SignalStatus.EXECUTING}:
+            return True
+    return False
+
+
+def _enqueue_auto_close_signals_locked(worker_id: str, profit_pct: float) -> list[Signal]:
+    worker = HEARTBEATS.get(worker_id)
+    if worker is None:
+        return []
+
+    created: list[Signal] = []
+    for position in worker.positions:
+        if position.ticket is None:
+            continue
+        position_profit_pct = _position_profit_pct(position)
+        if position_profit_pct is None or position_profit_pct < profit_pct:
+            continue
+        ticket = int(position.ticket)
+        if _has_pending_close_signal_locked(worker_id, ticket):
+            continue
+
+        close_side = SignalSide.SELL if position.side == SignalSide.BUY else SignalSide.BUY
+        close_signal = Signal(
+            symbol=_symbol_key(position.symbol),
+            side=close_side,
+            action=SignalAction.CLOSE,
+            lots=float(position.lots),
+            position_ticket=ticket,
+            confidence=1.0,
+            reason=f"auto-close-profit: {position_profit_pct:.4f}% >= {profit_pct:.4f}%",
+            target_worker_id=worker_id,
+        )
+        SIGNALS[close_signal.id] = close_signal
+        created.append(close_signal)
+    return created
+
+
+def _enqueue_reopen_after_close_locked(signal: Signal, report: ExecutionReport) -> Optional[Signal]:
+    if signal.action != SignalAction.CLOSE:
+        return None
+    if report.status != SignalStatus.FILLED:
+        return None
+    if not settings.mt5_worker.auto_reopen_after_close:
+        return None
+
+    reopen_side = SignalSide.BUY if signal.side == SignalSide.SELL else SignalSide.SELL
+    reopen_signal = Signal(
+        symbol=_symbol_key(signal.symbol),
+        side=reopen_side,
+        action=SignalAction.OPEN,
+        lots=float(report.lots if report.lots is not None else signal.lots),
+        confidence=1.0,
+        reason=f"auto-reopen-after-close:{signal.id}",
+        target_worker_id=signal.target_worker_id or report.worker_id,
+    )
+
+    if not _should_enqueue_signal_locked(reopen_signal):
+        return None
+    SIGNALS[reopen_signal.id] = reopen_signal
+    return reopen_signal
+
+
+def _parse_positions_json(raw_payload: Optional[str]) -> list[WorkerPosition]:
+    if not raw_payload:
+        return []
+    try:
+        payload = json.loads(raw_payload)
+    except Exception as exc:
+        logger.warning("heartbeat-ping positions_json parse failed: %s", exc)
+        return []
+
+    if not isinstance(payload, list):
+        logger.warning("heartbeat-ping positions_json is not a list")
+        return []
+
+    positions: list[WorkerPosition] = []
+    for idx, row in enumerate(payload):
+        if not isinstance(row, dict):
+            logger.warning("heartbeat-ping positions_json row[%d] ignored (not object)", idx)
+            continue
+        try:
+            positions.append(WorkerPosition.model_validate(row))
+        except Exception as exc:
+            logger.warning("heartbeat-ping positions_json row[%d] validation failed: %s", idx, exc)
+    return positions
 
 
 def _update_virtual_position_on_fill(report: ExecutionReport, signal: Signal) -> None:
@@ -277,14 +388,19 @@ def grid_strike_plan() -> Optional[GridPlan]:
 @app.post("/api/signals/create", response_model=Signal)
 def create_signal_from_grid(req: CreateSignalRequest = Body(...)) -> Signal:
     """Create a signal directly (for testing or manual trading)."""
+    symbol_key = _symbol_key(req.symbol)
+    lots = req.lots if req.lots is not None else settings.grid_strike.get_lots(symbol_key)
     signal = Signal(
-        symbol=_symbol_key(req.symbol),
+        symbol=symbol_key,
         side=SignalSide(req.side.lower()),
-        lots=req.lots,
+        action=SignalAction(req.action.lower()),
+        lots=lots,
+        position_ticket=req.position_ticket,
         stop_loss=req.stop_loss,
         take_profit=req.take_profit,
         confidence=0.95,
         reason="manual-create",
+        target_worker_id=req.target_worker_id,
     )
     with STATE_LOCK:
         SIGNALS[signal.id] = signal
@@ -297,9 +413,94 @@ def list_signals() -> list[Signal]:
         return list(SIGNALS.values())
 
 
+@app.get("/api/orders")
+def list_orders(
+    limit: int = Query(default=100, ge=1, le=1000),
+    worker_id: Optional[str] = None,
+    status: Optional[SignalStatus] = None,
+    _: None = Depends(require_worker_token),
+) -> list[dict[str, Any]]:
+    with STATE_LOCK:
+        reports = sorted(EXECUTIONS, key=lambda row: row.reported_at, reverse=True)
+        rows: list[dict[str, Any]] = []
+        for report in reports:
+            if worker_id and report.worker_id != worker_id:
+                continue
+            if status and report.status != status:
+                continue
+            signal = SIGNALS.get(report.signal_id)
+            rows.append(
+                {
+                    "signal_id": report.signal_id,
+                    "worker_id": report.worker_id,
+                    "status": report.status.value,
+                    "broker_order_id": report.broker_order_id,
+                    "executed_price": report.executed_price,
+                    "lots": report.lots,
+                    "message": report.message,
+                    "reported_at": report.reported_at.isoformat(),
+                    "symbol": signal.symbol if signal else None,
+                    "side": signal.side.value if signal else None,
+                    "action": signal.action.value if signal else None,
+                    "position_ticket": signal.position_ticket if signal else None,
+                    "reason": signal.reason if signal else None,
+                }
+            )
+            if len(rows) >= limit:
+                break
+        return rows
+
+
+@app.get("/api/workers", response_model=list[WorkerHeartbeat])
+def list_workers(_: None = Depends(require_worker_token)) -> list[WorkerHeartbeat]:
+    with STATE_LOCK:
+        return sorted(HEARTBEATS.values(), key=lambda hb: hb.timestamp, reverse=True)
+
+
+@app.get("/api/workers/{worker_id}", response_model=WorkerHeartbeat)
+def get_worker(worker_id: str, _: None = Depends(require_worker_token)) -> WorkerHeartbeat:
+    with STATE_LOCK:
+        worker = HEARTBEATS.get(worker_id)
+    if worker is None:
+        raise HTTPException(status_code=404, detail="worker not found")
+    return worker
+
+
+@app.get("/api/workers/{worker_id}/positions", response_model=list[WorkerPosition])
+def get_worker_positions(worker_id: str, _: None = Depends(require_worker_token)) -> list[WorkerPosition]:
+    with STATE_LOCK:
+        worker = HEARTBEATS.get(worker_id)
+    if worker is None:
+        raise HTTPException(status_code=404, detail="worker not found")
+    return worker.positions
+
+
+@app.post("/api/workers/{worker_id}/auto-close")
+def execute_auto_close(
+    worker_id: str,
+    profit_pct: float = Query(default=3.0, gt=0.0),
+    _: None = Depends(require_worker_token),
+) -> dict[str, Any]:
+    with STATE_LOCK:
+        worker = HEARTBEATS.get(worker_id)
+        if worker is None:
+            raise HTTPException(status_code=404, detail="worker not found")
+        created = _enqueue_auto_close_signals_locked(worker_id, profit_pct)
+        return {
+            "ok": True,
+            "worker_id": worker_id,
+            "profit_pct": profit_pct,
+            "positions_seen": len(worker.positions),
+            "close_signals_created": len(created),
+            "signal_ids": [signal.id for signal in created],
+        }
+
+
 def _claim_next_signal(worker_id: str) -> Optional[Signal]:
     with STATE_LOCK:
         for signal in SIGNALS.values():
+            if signal.target_worker_id and signal.target_worker_id != worker_id:
+                continue
             if signal.status == SignalStatus.CREATED:
                 signal.status = SignalStatus.CLAIMED
                 signal.worker_id = worker_id
@@ -340,6 +541,7 @@ def execution_report(report: ExecutionReport, _: None = Depends(require_worker_t
         if signal:
             signal.status = report.status
             _update_virtual_position_on_fill(report, signal)
+            _enqueue_reopen_after_close_locked(signal, report)
         report_count = len(EXECUTIONS)
     return {"ok": True, "reports": report_count}
 
@@ -348,6 +550,15 @@ def execution_report(report: ExecutionReport, _: None = Depends(require_worker_t
 def heartbeat(hb: WorkerHeartbeat, _: None = Depends(require_worker_token)) -> dict:
     with STATE_LOCK:
         HEARTBEATS[hb.worker_id] = hb
+        created = []
+        if hb.mt5_connected and settings.mt5_worker.auto_close_enabled:
+            created = _enqueue_auto_close_signals_locked(hb.worker_id, settings.mt5_worker.auto_close_profit_pct)
+            if created:
+                logger.info(
+                    "auto-close created %d close signal(s) for worker=%s",
+                    len(created),
+                    hb.worker_id,
+                )
     return {"ok": True, "server_time": datetime.now(timezone.utc).isoformat()}
 
 
@@ -360,8 +571,10 @@ def heartbeat_ping(
     balance: Optional[float] = None,
     equity: Optional[float] = None,
     open_positions: int = 0,
+    positions_json: Optional[str] = None,
     _: None = Depends(require_worker_token),
 ) -> str:
+    positions = _parse_positions_json(positions_json)
     with STATE_LOCK:
         HEARTBEATS[worker_id] = WorkerHeartbeat(
             worker_id=worker_id,
@@ -370,7 +583,8 @@ def heartbeat_ping(
             broker=broker,
             balance=balance,
             equity=equity,
-            open_positions=open_positions,
+            open_positions=max(open_positions, len(positions)),
+            positions=positions,
         )
     return "ok"
 
@@ -401,6 +615,7 @@ def execution_report_ping(
         if signal:
             signal.status = report.status
             _update_virtual_position_on_fill(report, signal)
+            _enqueue_reopen_after_close_locked(signal, report)
     return "ok"
 
 
@@ -417,6 +632,7 @@ def create_test_signal(
     signal = Signal(
         symbol=_symbol_key(symbol),
         side=SignalSide(side.lower()),
+        action=SignalAction.OPEN,
         lots=lots,
         stop_loss=stop_loss,
         take_profit=take_profit,

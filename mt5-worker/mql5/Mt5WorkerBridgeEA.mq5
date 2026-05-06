@@ -153,7 +153,76 @@ string UrlEncode(string value)
       else
          encoded += StringFormat("%%%02X", c);
      }
-   return encoded;
+  return encoded;
+  }
+
+string JsonEscape(string value)
+  {
+   string escaped = "";
+   for(int i = 0; i < StringLen(value); i++)
+     {
+      ushort c = StringGetCharacter(value, i);
+      if(c == '\\')
+         escaped += "\\\\";
+      else if(c == '"')
+         escaped += "\\\"";
+      else if(c == '\n')
+         escaped += "\\n";
+      else if(c == '\r')
+         escaped += "\\r";
+      else if(c == '\t')
+         escaped += "\\t";
+      else
+         escaped += ShortToString(c);
+     }
+   return escaped;
+  }
+
+string BuildPositionsJson()
+  {
+   int total = PositionsTotal();
+   string json = "[";
+   bool first = true;
+
+   for(int i = 0; i < total; i++)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionSelectByTicket(ticket))
+         continue;
+
+      string symbol = PositionGetString(POSITION_SYMBOL);
+      long position_type = PositionGetInteger(POSITION_TYPE);
+      string side = position_type == POSITION_TYPE_SELL ? "sell" : "buy";
+      double lots = PositionGetDouble(POSITION_VOLUME);
+      double entry_price = PositionGetDouble(POSITION_PRICE_OPEN);
+      double current_price = PositionGetDouble(POSITION_PRICE_CURRENT);
+      double profit = PositionGetDouble(POSITION_PROFIT);
+      double swap = PositionGetDouble(POSITION_SWAP);
+      long opened_at = PositionGetInteger(POSITION_TIME);
+      long magic = PositionGetInteger(POSITION_MAGIC);
+      string comment = PositionGetString(POSITION_COMMENT);
+
+      if(!first)
+         json += ",";
+      json += StringFormat(
+         "{\"ticket\":%I64u,\"symbol\":\"%s\",\"side\":\"%s\",\"lots\":%s,\"entry_price\":%s,\"current_price\":%s,\"profit\":%s,\"swap\":%s,\"opened_at\":%I64d,\"magic\":%I64d,\"comment\":\"%s\"}",
+         ticket,
+         JsonEscape(symbol),
+         side,
+         DoubleToString(lots, 2),
+         DoubleToString(entry_price, 8),
+         DoubleToString(current_price, 8),
+         DoubleToString(profit, 2),
+         DoubleToString(swap, 2),
+         opened_at,
+         magic,
+         JsonEscape(comment)
+      );
+      first = false;
+     }
+
+   json += "]";
+   return json;
   }
 
 bool SendHeartbeat()
@@ -163,14 +232,16 @@ bool SendHeartbeat()
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    int open_positions = PositionsTotal();
+   string positions_json = BuildPositionsJson();
    string path = StringFormat(
-      "/api/worker/heartbeat-ping?worker_id=%s&mt5_connected=true&account_login=%I64d&broker=%s&balance=%s&equity=%s&open_positions=%d",
+      "/api/worker/heartbeat-ping?worker_id=%s&mt5_connected=true&account_login=%I64d&broker=%s&balance=%s&equity=%s&open_positions=%d&positions_json=%s",
       UrlEncode(g_worker_id),
       login,
       UrlEncode(broker),
       DoubleToString(balance, 2),
       DoubleToString(equity, 2),
-      open_positions
+      open_positions,
+      UrlEncode(positions_json)
    );
    string response;
    int status;

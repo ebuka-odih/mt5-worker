@@ -88,6 +88,9 @@ class Mt5WorkerSettings(BaseModel):
     allowed_order_types: list[str] = Field(default_factory=lambda: ["market", "limit"])
     magic_number: int = 552501
     comment_prefix: str = "vps_forex_brain"
+    auto_close_enabled: bool = True
+    auto_close_profit_pct: float = 3.0
+    auto_reopen_after_close: bool = True
 
 
 class AppSection(BaseModel):

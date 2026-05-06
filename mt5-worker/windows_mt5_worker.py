@@ -28,6 +28,7 @@ import signal
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import requests
@@ -146,6 +147,46 @@ class MT5State:
 _mt5_state = MT5State()
 
 
+def _position_side(position_type: Any) -> str:
+    if mt5 is None:
+        return "buy"
+    if position_type == mt5.POSITION_TYPE_BUY:
+        return "buy"
+    if position_type == mt5.POSITION_TYPE_SELL:
+        return "sell"
+    return "buy"
+
+
+def _serialize_positions(positions: list[Any]) -> list[dict[str, Any]]:
+    serialized: list[dict[str, Any]] = []
+    for pos in positions:
+        opened_at = None
+        ts = getattr(pos, "time", None)
+        if ts:
+            try:
+                opened_at = datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
+            except Exception:
+                opened_at = None
+
+        serialized.append(
+            {
+                "ticket": getattr(pos, "ticket", None),
+                "symbol": getattr(pos, "symbol", ""),
+                "side": _position_side(getattr(pos, "type", None)),
+                "lots": float(getattr(pos, "volume", 0.0)),
+                "entry_price": float(getattr(pos, "price_open", 0.0)),
+                "current_price": float(getattr(pos, "price_current", 0.0)),
+                "profit": float(getattr(pos, "profit", 0.0)),
+                "swap": float(getattr(pos, "swap", 0.0)),
+                "commission": float(getattr(pos, "commission", 0.0)),
+                "opened_at": opened_at,
+                "magic": getattr(pos, "magic", None),
+                "comment": str(getattr(pos, "comment", "") or ""),
+            }
+        )
+    return serialized
+
+
 def send_heartbeat() -> None:
     """Send heartbeat to VPS with current worker status."""
     global _mt5_state
@@ -153,6 +194,7 @@ def send_heartbeat() -> None:
     if _mt5_state.ensure_initialized():
         account = mt5.account_info()
         positions = mt5.positions_get() or []
+        positions_payload = _serialize_positions(list(positions))
         payload = {
             "worker_id": WORKER_ID,
             "mt5_connected": True,
@@ -161,6 +203,7 @@ def send_heartbeat() -> None:
             "balance": getattr(account, "balance", None),
             "equity": getattr(account, "equity", None),
             "open_positions": len(positions),
+            "positions": positions_payload,
             "dry_run": DRY_RUN,
         }
     else:
@@ -168,6 +211,7 @@ def send_heartbeat() -> None:
             "worker_id": WORKER_ID,
             "mt5_connected": False,
             "open_positions": 0,
+            "positions": [],
             "dry_run": DRY_RUN,
         }
 
@@ -243,10 +287,14 @@ def execute_signal(signal: dict[str, Any]) -> None:
 
     signal_id = signal.get("id", "unknown")
     logger.info(f"Executing signal: {signal}")
+    action = str(signal.get("action", "open")).lower()
 
     if DRY_RUN:
         # Dry-run mode: accept signal but don't place real order
-        logger.info(f"[DRY_RUN] Would execute signal {signal_id}: {signal.get('side').upper()} {signal.get('lots')} {signal.get('symbol')}")
+        logger.info(
+            f"[DRY_RUN] Would execute signal {signal_id}: action={action} side={signal.get('side').upper()} "
+            f"lots={signal.get('lots')} symbol={signal.get('symbol')} ticket={signal.get('position_ticket')}"
+        )
         report(signal_id, "filled", "DRY_RUN accepted signal; no MT5 order sent", lots=signal.get("lots"))
         return
 
@@ -254,35 +302,81 @@ def execute_signal(signal: dict[str, Any]) -> None:
         report(signal_id, "rejected", "MT5 not connected or initialization failed")
         return
 
+    request: dict[str, Any]
     symbol = signal["symbol"]
-    if not mt5.symbol_select(symbol, True):
-        error = mt5.last_error()
-        report(signal_id, "rejected", f"symbol_select failed for {symbol}: {error}")
-        return
+    lots = float(signal["lots"])
+    price: float
 
-    tick = mt5.symbol_info_tick(symbol)
-    if tick is None:
-        report(signal_id, "rejected", f"no tick for {symbol}")
-        return
+    if action == "close":
+        position_ticket = signal.get("position_ticket")
+        if position_ticket is None:
+            report(signal_id, "rejected", "close signal missing position_ticket")
+            return
+        positions = mt5.positions_get(ticket=int(position_ticket)) or []
+        if not positions:
+            report(signal_id, "rejected", f"position not found for ticket={position_ticket}")
+            return
+        position = positions[0]
+        symbol = getattr(position, "symbol", symbol)
+        if not mt5.symbol_select(symbol, True):
+            error = mt5.last_error()
+            report(signal_id, "rejected", f"symbol_select failed for {symbol}: {error}")
+            return
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            report(signal_id, "rejected", f"no tick for {symbol}")
+            return
 
-    side = signal["side"].lower()
-    order_type = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
-    price = tick.ask if side == "buy" else tick.bid
+        position_type = getattr(position, "type", None)
+        # Close BUY with SELL at bid, close SELL with BUY at ask.
+        if position_type == mt5.POSITION_TYPE_BUY:
+            order_type = mt5.ORDER_TYPE_SELL
+            price = tick.bid
+        else:
+            order_type = mt5.ORDER_TYPE_BUY
+            price = tick.ask
 
-    request = {
-        "action": mt5.TRADE_ACTION_DEAL,
-        "symbol": symbol,
-        "volume": float(signal["lots"]),
-        "type": order_type,
-        "price": price,
-        "sl": signal.get("stop_loss") or 0.0,
-        "tp": signal.get("take_profit") or 0.0,
-        "deviation": 20,
-        "magic": MAGIC,
-        "comment": "vps_forex_brain",
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC,
-    }
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": min(lots, float(getattr(position, "volume", lots))),
+            "type": order_type,
+            "position": int(position_ticket),
+            "price": price,
+            "deviation": 20,
+            "magic": MAGIC,
+            "comment": "vps_forex_close",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+    else:
+        if not mt5.symbol_select(symbol, True):
+            error = mt5.last_error()
+            report(signal_id, "rejected", f"symbol_select failed for {symbol}: {error}")
+            return
+
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            report(signal_id, "rejected", f"no tick for {symbol}")
+            return
+
+        side = signal["side"].lower()
+        order_type = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
+        price = tick.ask if side == "buy" else tick.bid
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": lots,
+            "type": order_type,
+            "price": price,
+            "sl": signal.get("stop_loss") or 0.0,
+            "tp": signal.get("take_profit") or 0.0,
+            "deviation": 20,
+            "magic": MAGIC,
+            "comment": "vps_forex_brain",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
 
     result = mt5.order_send(request)
     if result is None:

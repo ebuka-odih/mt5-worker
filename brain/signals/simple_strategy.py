@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Optional
 
 import pandas as pd
 
@@ -21,7 +22,7 @@ def pip_size(symbol: str) -> float:
     return 0.01 if symbol.upper().endswith("JPY") else 0.0001
 
 
-def simple_signal(symbol: str, candles: pd.DataFrame, settings: Settings) -> Signal | None:
+def simple_signal(symbol: str, candles: pd.DataFrame, settings: Settings) -> Optional[Signal]:
     """Very conservative starter signal for paper/demo only.
 
     Logic:
@@ -38,7 +39,7 @@ def simple_signal(symbol: str, candles: pd.DataFrame, settings: Settings) -> Sig
     last = float(close.iloc[-1])
     current_rsi = rsi(close, settings.strategy.rsi_period)
 
-    side: SignalSide | None = None
+    side: Optional[SignalSide] = None
     confidence = 0.0
     reason = ""
 
@@ -66,7 +67,7 @@ def simple_signal(symbol: str, candles: pd.DataFrame, settings: Settings) -> Sig
     return Signal(
         symbol=symbol.upper(),
         side=side,
-        lots=0.01,
+        lots=settings.grid_strike.get_lots(symbol.upper()),
         stop_loss=round(sl, 5),
         take_profit=round(tp, 5),
         confidence=round(confidence, 3),
