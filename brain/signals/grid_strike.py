@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Mapping, Optional
 
 import pandas as pd
 from pydantic import BaseModel, Field
@@ -145,8 +145,8 @@ def score_grid_candidate(
 
 def build_grid_plan(
     candidate: GridStrikeCandidate,
-    mid_price: float | None = None,
-    settings: GridStrikeSettings | None = None,
+    mid_price: Optional[float] = None,
+    settings: Optional[GridStrikeSettings] = None,
 ) -> GridPlan:
     settings = settings or GridStrikeSettings()
     mid = float(mid_price if mid_price is not None else candidate.mid_price)
