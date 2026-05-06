@@ -28,6 +28,8 @@ risk:
   challenge_max_days: 60
   max_open_positions: 50
   max_positions_per_symbol: 50
+  max_same_side_positions: 30
+  max_directional_skew: 20
   default_stop_loss_pips: 500
   default_take_profit_pips: 1000
   min_rr: 2.0
@@ -61,6 +63,11 @@ grid_strike:
   grid_spacing: 500.0
   take_profit_spacing: 1000.0
   stop_loss_spacing: 500.0
+  atr_period: 14
+  atr_spacing_multiplier: 1.25
+  session_start_hour_utc: 6
+  session_end_hour_utc: 22
+  max_spread_pips: 0.0
   order_lots: 0.01
   symbol_lots:
     BTCUSD: 0.01
@@ -82,4 +89,9 @@ mt5_worker:
   comment_prefix: vps_forex_brain
   auto_close_enabled: true
   auto_close_profit_pct: 3.0
+  auto_close_loss_pct: 1.5
+  basket_take_profit_usd: 500.0
+  stale_position_minutes: 360
+  volatility_spike_close_pct: 4.0
+  reentry_cooldown_seconds: 300
   auto_reopen_after_close: true

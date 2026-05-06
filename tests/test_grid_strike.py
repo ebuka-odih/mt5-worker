@@ -23,28 +23,51 @@ def candles_from(values: list[float]) -> pd.DataFrame:
     )
 
 
+def candles_with_time_and_spread(values: list[float], spread_pips: float, start: str = "2026-01-01T10:00:00Z") -> pd.DataFrame:
+    frame = candles_from(values)
+    frame.index = pd.date_range(start, periods=len(values), freq="h", tz="UTC")
+    frame["SpreadPips"] = spread_pips
+    return frame
+
+
 def test_score_grid_candidate_prefers_scalpable_ranging_market() -> None:
     # Tight oscillation around a stable mean: good for grid scalping.
     values = [1.1000 + (0.0008 if i % 2 else -0.0008) for i in range(96)]
-    candles = candles_from(values)
+    candles = candles_with_time_and_spread(values, spread_pips=0.2)
 
-    candidate = score_grid_candidate("EURUSD", candles, GridStrikeSettings())
+    candidate = score_grid_candidate("EURUSD", candles, GridStrikeSettings(max_spread_pips=1.0))
 
     assert candidate.symbol == "EURUSD"
     assert candidate.tradeable is True
     assert candidate.market_regime == "range"
     assert candidate.score >= 0.55
+    assert candidate.atr_pips > 0
     assert candidate.reason
 
 
 def test_score_grid_candidate_rejects_thin_flat_market() -> None:
     values = [1.1000 + (0.00002 if i % 2 else -0.00002) for i in range(96)]
-    candles = candles_from(values)
+    candles = candles_with_time_and_spread(values, spread_pips=0.2)
 
     candidate = score_grid_candidate("EURUSD", candles, GridStrikeSettings())
 
     assert candidate.tradeable is False
     assert "range too small" in candidate.reason.lower()
+
+
+def test_score_grid_candidate_rejects_wide_spread_and_out_of_session() -> None:
+    values = [1.1000 + (0.0008 if i % 2 else -0.0008) for i in range(96)]
+    candles = candles_with_time_and_spread(values, spread_pips=4.0, start="2026-01-01T02:00:00Z")
+
+    candidate = score_grid_candidate(
+        "EURUSD",
+        candles,
+        GridStrikeSettings(max_spread_pips=1.0, session_start_hour_utc=6, session_end_hour_utc=22),
+    )
+
+    assert candidate.tradeable is False
+    assert "outside configured session window" in candidate.reason.lower()
+    assert "spread too wide" in candidate.reason.lower()
 
 
 def test_build_grid_plan_creates_buy_and_sell_strikes_around_mid() -> None:

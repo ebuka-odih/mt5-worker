@@ -32,7 +32,9 @@ PYTHONPATH=. python -m uvicorn brain.api.server:app --host 0.0.0.0 --port 8780
 curl http://127.0.0.1:8780/health
 curl http://127.0.0.1:8780/api/market/quotes
 curl -X POST http://127.0.0.1:8780/api/grid-strike/scan
+curl -X POST http://127.0.0.1:8780/api/grid-strike/scan-all
 curl -X POST http://127.0.0.1:8780/api/grid-strike/plan
+curl "http://127.0.0.1:8780/api/diagnostics/summary?worker_token=<TOKEN>"
 ```
 
 ### Worker Position State Endpoints
@@ -43,6 +45,7 @@ Use the worker token from `config/settings.yaml` as `worker_token` query param.
 curl "http://127.0.0.1:8780/api/workers?worker_token=<TOKEN>"
 curl "http://127.0.0.1:8780/api/workers/windows-mt5-atlas-01?worker_token=<TOKEN>"
 curl "http://127.0.0.1:8780/api/workers/windows-mt5-atlas-01/positions?worker_token=<TOKEN>"
+curl "http://127.0.0.1:8780/api/workers/windows-mt5-atlas-01/diagnostics?worker_token=<TOKEN>"
 curl "http://127.0.0.1:8780/api/orders?worker_token=<TOKEN>&worker_id=windows-mt5-atlas-01&limit=20"
 curl -X POST "http://127.0.0.1:8780/api/workers/windows-mt5-atlas-01/auto-close?worker_token=<TOKEN>&profit_pct=3.0"
 ```
@@ -51,6 +54,16 @@ curl -X POST "http://127.0.0.1:8780/api/workers/windows-mt5-atlas-01/auto-close?
 floating gain is at or above `profit_pct`; after a close fill, the brain
 automatically queues a new open signal in the same direction when
 `mt5_worker.auto_reopen_after_close: true`.
+
+`/api/diagnostics/summary` exposes:
+- entry block counts by reason
+- grid rejection counts by reason
+- close reason counts
+- cooldown state per symbol
+- basket net PnL per worker
+
+`/api/workers/{worker_id}/diagnostics` exposes per-position net PnL, profit
+percent, and age in minutes for that worker.
 
 ## Windows MT5 Worker Setup
 
@@ -190,6 +203,8 @@ Key files:
 - `portfolio_sim.py` — portfolio simulation
 
 ## Troubleshooting
+
+For deployment and pre-live checks, use [docs/DEPLOYMENT_CHECKLIST.md](/Users/gnosis/Herd/mt5-worker/docs/DEPLOYMENT_CHECKLIST.md).
 
 ### Worker can't connect to VPS
 ```cmd

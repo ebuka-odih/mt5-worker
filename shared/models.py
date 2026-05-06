@@ -53,6 +53,7 @@ class Signal(BaseModel):
     claimed_at: Optional[datetime] = None
     worker_id: Optional[str] = None
     target_worker_id: Optional[str] = None
+    close_reason: Optional[str] = None
 
 
 class ExecutionReport(BaseModel):
@@ -79,6 +80,10 @@ class WorkerPosition(BaseModel):
     opened_at: Optional[datetime] = None
     magic: Optional[int] = None
     comment: str = ""
+
+    @property
+    def net_profit(self) -> float:
+        return float(self.profit or 0.0) + float(self.swap or 0.0) + float(self.commission or 0.0)
 
 
 class WorkerHeartbeat(BaseModel):
