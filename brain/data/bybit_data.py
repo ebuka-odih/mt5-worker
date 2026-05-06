@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Iterable, Protocol
+from typing import Iterable, Optional, Protocol
 
 import pandas as pd
 import requests
@@ -81,7 +81,7 @@ class BybitMarketDataProvider:
 
     source = "bybit"
 
-    def __init__(self, session: SupportsGet | None = None, base_url: str = "https://api.bybit.com") -> None:
+    def __init__(self, session: Optional[SupportsGet] = None, base_url: str = "https://api.bybit.com") -> None:
         self.session = session or requests.Session()
         self.base_url = base_url.rstrip("/")
 
@@ -167,9 +167,9 @@ class BybitWebhookCache:
         self,
         symbol: str,
         price: float,
-        bid: float | None = None,
-        ask: float | None = None,
-        timestamp: datetime | None = None,
+        bid: Optional[float] = None,
+        ask: Optional[float] = None,
+        timestamp: Optional[datetime] = None,
     ) -> ForexQuote:
         normalized_symbol = symbol.upper().replace("/", "")
         quote = ForexQuote(
