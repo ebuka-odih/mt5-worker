@@ -355,39 +355,70 @@ def execute_signal(signal: dict[str, Any]) -> None:
             report(signal_id, "rejected", f"symbol_select failed for {symbol}: {error}")
             return
 
-        tick = mt5.symbol_info_tick(symbol)
-        if tick is None:
-            report(signal_id, "rejected", f"no tick for {symbol}")
-            return
+        side = str(signal["side"]).lower()
+        requested_order_type = str(signal.get("order_type") or "market").lower()
+        comment = "vps_forex_brain"
+        grid_id = signal.get("grid_id")
+        grid_index = signal.get("grid_index")
+        if grid_id:
+            index_suffix = "" if grid_index is None else f":{grid_index}"
+            comment = f"grid:{grid_id}{index_suffix}"
 
-        side = signal["side"].lower()
-        order_type = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
-        price = tick.ask if side == "buy" else tick.bid
-        request = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
-            "volume": lots,
-            "type": order_type,
-            "price": price,
-            "sl": signal.get("stop_loss") or 0.0,
-            "tp": signal.get("take_profit") or 0.0,
-            "deviation": 20,
-            "magic": MAGIC,
-            "comment": "vps_forex_brain",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
-        }
+        if requested_order_type == "limit":
+            limit_price = signal.get("limit_price")
+            if limit_price is None:
+                report(signal_id, "rejected", "limit order missing limit_price")
+                return
+            price = float(limit_price)
+            order_type = mt5.ORDER_TYPE_BUY_LIMIT if side == "buy" else mt5.ORDER_TYPE_SELL_LIMIT
+            request = {
+                "action": mt5.TRADE_ACTION_PENDING,
+                "symbol": symbol,
+                "volume": lots,
+                "type": order_type,
+                "price": price,
+                "sl": signal.get("stop_loss") or 0.0,
+                "tp": signal.get("take_profit") or 0.0,
+                "deviation": 20,
+                "magic": MAGIC,
+                "comment": comment,
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": getattr(mt5, "ORDER_FILLING_RETURN", mt5.ORDER_FILLING_IOC),
+            }
+        else:
+            tick = mt5.symbol_info_tick(symbol)
+            if tick is None:
+                report(signal_id, "rejected", f"no tick for {symbol}")
+                return
+
+            order_type = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
+            price = tick.ask if side == "buy" else tick.bid
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": symbol,
+                "volume": lots,
+                "type": order_type,
+                "price": price,
+                "sl": signal.get("stop_loss") or 0.0,
+                "tp": signal.get("take_profit") or 0.0,
+                "deviation": 20,
+                "magic": MAGIC,
+                "comment": comment,
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_IOC,
+            }
 
     result = mt5.order_send(request)
     if result is None:
         report(signal_id, "rejected", f"order_send returned None: {mt5.last_error()}")
         return
 
-    if result.retcode != mt5.TRADE_RETCODE_DONE:
+    success_retcodes = {mt5.TRADE_RETCODE_DONE, getattr(mt5, "TRADE_RETCODE_PLACED", mt5.TRADE_RETCODE_DONE)}
+    if result.retcode not in success_retcodes:
         report(signal_id, "rejected", f"MT5 retcode={result.retcode}, comment={result.comment}")
         return
 
-    logger.info(f"Order filled: {signal_id} -> order_id={result.order}, price={price}")
+    logger.info(f"Order accepted: {signal_id} -> order_id={result.order}, price={price}")
     if action == "close":
         report(
             signal_id,
@@ -396,6 +427,17 @@ def execute_signal(signal: dict[str, Any]) -> None:
             broker_order_id=str(result.order),
             executed_price=price,
             lots=float(request.get("volume", lots)),
+        )
+        return
+
+    if request["action"] == mt5.TRADE_ACTION_PENDING:
+        report(
+            signal_id,
+            "filled",
+            "MT5 pending order placed",
+            broker_order_id=str(result.order),
+            executed_price=price,
+            lots=float(signal["lots"]),
         )
         return
     report(signal_id, "filled", "MT5 order filled", broker_order_id=str(result.order), executed_price=price, lots=float(signal["lots"]))
