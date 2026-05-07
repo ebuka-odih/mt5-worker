@@ -44,6 +44,7 @@ class Signal(BaseModel):
     action: SignalAction = SignalAction.OPEN
     lots: float
     position_ticket: Optional[int] = None
+    limit_price: Optional[float] = None
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     confidence: float = 0.0
@@ -54,6 +55,8 @@ class Signal(BaseModel):
     worker_id: Optional[str] = None
     target_worker_id: Optional[str] = None
     close_reason: Optional[str] = None
+    grid_id: Optional[str] = None
+    grid_index: Optional[int] = None
 
 
 class ExecutionReport(BaseModel):

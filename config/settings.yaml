@@ -88,7 +88,7 @@ mt5_worker:
   magic_number: 552501
   comment_prefix: vps_forex_brain
   auto_close_enabled: true
-  auto_close_profit_pct: 3.0
+  auto_close_profit_pct: 2.0
   auto_close_loss_pct: 1.5
   basket_take_profit_usd: 500.0
   stale_position_minutes: 360

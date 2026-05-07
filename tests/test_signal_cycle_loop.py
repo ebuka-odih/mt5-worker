@@ -7,7 +7,8 @@ import pytest
 
 from brain.api import server
 from brain.api.server import VirtualPosition
-from shared.models import Signal, SignalSide, SignalStatus, WorkerPosition
+from brain.signals.grid_strike import GridLevel, GridPlan, GridStrikeCandidate
+from shared.models import Signal, SignalSide, SignalStatus, WorkerHeartbeat, WorkerPosition
 
 
 class DummyProvider:
@@ -30,6 +31,9 @@ def _reset_runtime_state() -> None:
         server.HEARTBEATS.clear()
         server.VIRTUAL_POSITIONS.clear()
         server.LAST_CLOSE_TIMES.clear()
+        server.ENTRY_BLOCK_COUNTS.clear()
+        server.GRID_REJECTION_COUNTS.clear()
+        server.CLOSE_REASON_COUNTS.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -170,3 +174,139 @@ def test_manual_signal_create_rejects_when_margin_cap_is_already_exceeded(monkey
 
     assert response.status_code == 409
     assert "margin usage too high" in response.json()["detail"]
+
+
+def _tradeable_candidate(symbol: str = "BTCUSD", *, mid_price: float = 100_000.0) -> GridStrikeCandidate:
+    return GridStrikeCandidate(
+        symbol=symbol,
+        score=0.91,
+        tradeable=True,
+        market_regime="range",
+        mid_price=mid_price,
+        range_pct=0.7,
+        trend_ratio=0.2,
+        atr_pips=125.0,
+        spread_pips=0.0,
+        grid_spacing_pips=250.0,
+        reason="test-grid",
+    )
+
+
+def _grid_plan(symbol: str, *, levels_each_side: int, lots: float = 0.1, mid_price: float = 100_000.0, step: float = 250.0) -> GridPlan:
+    buy_levels = [
+        GridLevel(index=i, side="buy", price=mid_price - (step * i), lots=lots)
+        for i in range(1, levels_each_side + 1)
+    ]
+    sell_levels = [
+        GridLevel(index=i, side="sell", price=mid_price + (step * i), lots=lots)
+        for i in range(1, levels_each_side + 1)
+    ]
+    return GridPlan(
+        symbol=symbol,
+        score=0.91,
+        mid_price=mid_price,
+        lower_bound=buy_levels[-1].price,
+        upper_bound=sell_levels[-1].price,
+        grid_spacing_pips=step,
+        lots_per_level=lots,
+        buy_levels=buy_levels,
+        sell_levels=sell_levels,
+        reason="test-grid",
+    )
+
+
+def test_scan_enqueues_multiple_grid_levels_per_symbol(monkeypatch) -> None:
+    monkeypatch.setattr(server.settings.market_data, "symbols", ["BTCUSD"])
+    monkeypatch.setattr(server, "provider", DummyProvider())
+    monkeypatch.setattr(server.settings.grid_strike, "enabled", True)
+    monkeypatch.setattr(server.settings.grid_strike, "levels_each_side", 2)
+    monkeypatch.setattr(server.settings.risk, "max_open_positions", 10)
+    monkeypatch.setattr(server.settings.risk, "max_positions_per_symbol", 10)
+    monkeypatch.setattr(server.settings.risk, "max_same_side_positions", 0)
+    monkeypatch.setattr(server.settings.risk, "max_directional_skew", 0)
+
+    def fail_if_legacy_signal_used(symbol: str, candles: pd.DataFrame, _settings) -> Signal:
+        raise AssertionError(f"legacy simple_signal path used for {symbol}")
+
+    monkeypatch.setattr(server, "simple_signal", fail_if_legacy_signal_used)
+    monkeypatch.setattr(server, "score_grid_candidate", lambda symbol, candles, _settings: _tradeable_candidate(symbol))
+    monkeypatch.setattr(server, "build_grid_plan", lambda candidate, mid_price=None, settings=None: _grid_plan(candidate.symbol, levels_each_side=2))
+
+    created = server._run_strategy_scan_once()
+
+    assert len(created) == 4
+    assert [signal.side for signal in created] == [SignalSide.BUY, SignalSide.BUY, SignalSide.SELL, SignalSide.SELL]
+    assert all(signal.symbol == "BTCUSD" for signal in created)
+
+
+def test_scan_allows_hedged_buy_and_sell_grid_levels_for_same_symbol(monkeypatch) -> None:
+    monkeypatch.setattr(server.settings.market_data, "symbols", ["BTCUSD"])
+    monkeypatch.setattr(server, "provider", DummyProvider())
+    monkeypatch.setattr(server.settings.grid_strike, "enabled", True)
+    monkeypatch.setattr(server.settings.grid_strike, "levels_each_side", 1)
+    monkeypatch.setattr(server.settings.risk, "max_open_positions", 10)
+    monkeypatch.setattr(server.settings.risk, "max_positions_per_symbol", 10)
+    monkeypatch.setattr(server.settings.risk, "max_same_side_positions", 10)
+    monkeypatch.setattr(server.settings.risk, "max_directional_skew", 10)
+
+    def fail_if_legacy_signal_used(symbol: str, candles: pd.DataFrame, _settings) -> Signal:
+        raise AssertionError(f"legacy simple_signal path used for {symbol}")
+
+    monkeypatch.setattr(server, "simple_signal", fail_if_legacy_signal_used)
+    monkeypatch.setattr(server, "score_grid_candidate", lambda symbol, candles, _settings: _tradeable_candidate(symbol))
+    monkeypatch.setattr(server, "build_grid_plan", lambda candidate, mid_price=None, settings=None: _grid_plan(candidate.symbol, levels_each_side=1))
+
+    created = server._run_strategy_scan_once()
+
+    assert len(created) == 2
+    assert {signal.side for signal in created} == {SignalSide.BUY, SignalSide.SELL}
+
+
+def test_scan_caps_grid_levels_when_funded_margin_budget_would_be_exceeded(monkeypatch) -> None:
+    monkeypatch.setattr(server.settings.market_data, "symbols", ["BTCUSD"])
+    monkeypatch.setattr(server, "provider", DummyProvider())
+    monkeypatch.setattr(server.settings.grid_strike, "enabled", True)
+    monkeypatch.setattr(server.settings.grid_strike, "levels_each_side", 2)
+    monkeypatch.setattr(server.settings.risk, "starting_balance", 400_000.0)
+    monkeypatch.setattr(server.settings.risk, "funded_challenge_mode", True)
+    monkeypatch.setattr(server.settings.risk, "leverage", 10.0)
+    monkeypatch.setattr(server.settings.risk, "max_margin_usage_pct", 60.0)
+    monkeypatch.setattr(server.settings.risk, "max_open_positions", 10)
+    monkeypatch.setattr(server.settings.risk, "max_positions_per_symbol", 10)
+    monkeypatch.setattr(server.settings.risk, "max_same_side_positions", 10)
+    monkeypatch.setattr(server.settings.risk, "max_directional_skew", 10)
+
+    with server.STATE_LOCK:
+        server.HEARTBEATS["windows-mt5-atlas-01"] = WorkerHeartbeat(
+            worker_id="windows-mt5-atlas-01",
+            mt5_connected=True,
+            balance=400_000.0,
+            equity=400_000.0,
+            open_positions=1,
+            positions=[
+                WorkerPosition(
+                    symbol="BTCUSD",
+                    side=SignalSide.BUY,
+                    lots=20.0,
+                    entry_price=100_000.0,
+                    current_price=100_000.0,
+                )
+            ],
+        )
+
+    def fail_if_legacy_signal_used(symbol: str, candles: pd.DataFrame, _settings) -> Signal:
+        raise AssertionError(f"legacy simple_signal path used for {symbol}")
+
+    monkeypatch.setattr(server, "simple_signal", fail_if_legacy_signal_used)
+    monkeypatch.setattr(server, "score_grid_candidate", lambda symbol, candles, _settings: _tradeable_candidate(symbol))
+    monkeypatch.setattr(
+        server,
+        "build_grid_plan",
+            lambda candidate, mid_price=None, settings=None: _grid_plan(candidate.symbol, levels_each_side=2, lots=4.0),
+)
+
+    created = server._run_strategy_scan_once()
+
+    assert len(created) == 1
+    assert created[0].side == SignalSide.BUY
+    assert server.ENTRY_BLOCK_COUNTS["entry blocked"] >= 1

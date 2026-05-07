@@ -96,7 +96,7 @@ class Mt5WorkerSettings(BaseModel):
     magic_number: int = 552501
     comment_prefix: str = "vps_forex_brain"
     auto_close_enabled: bool = True
-    auto_close_profit_pct: float = 3.0
+    auto_close_profit_pct: float = 2.0
     auto_close_loss_pct: float = 1.5
     basket_take_profit_usd: float = 0.0
     stale_position_minutes: int = 0

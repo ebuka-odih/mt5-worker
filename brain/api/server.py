@@ -63,6 +63,7 @@ class CreateSignalRequest(BaseModel):
     action: str = "open"
     lots: Optional[float] = None
     position_ticket: Optional[int] = None
+    limit_price: Optional[float] = None
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     target_worker_id: Optional[str] = None
@@ -111,31 +112,32 @@ def _basket_net_profit(worker: WorkerHeartbeat) -> float:
     return round(sum(position.net_profit for position in worker.positions), 2)
 
 
-def _should_enqueue_signal_locked(signal: Signal) -> bool:
+def _should_enqueue_signal_locked(signal: Signal, extra_positions: Optional[list[PositionExposure]] = None) -> bool:
     if signal.action == SignalAction.CLOSE:
         return True
+
     symbol = _symbol_key(signal.symbol)
-    if _has_pending_signal_locked(symbol):
+    is_grid_signal = bool(signal.grid_id)
+
+    if not is_grid_signal and _has_pending_signal_locked(symbol):
         _bump_counter_locked(ENTRY_BLOCK_COUNTS, "pending-signal")
         return False
     if _cooldown_remaining_seconds_locked(symbol) > 0:
         _bump_counter_locked(ENTRY_BLOCK_COUNTS, "reentry-cooldown")
         logger.info("entry blocked for %s by cooldown", symbol)
         return False
+
     current = VIRTUAL_POSITIONS.get(symbol)
-    if current is None:
-        guard = _entry_guard_locked(signal)
-        if not guard.allowed:
-            _bump_counter_locked(ENTRY_BLOCK_COUNTS, _bucket_reason(guard.reason))
-            logger.info("entry blocked for %s:%s - %s", signal.symbol, signal.side.value, guard.reason)
+    if current is not None and not is_grid_signal:
+        # Keep one directional exposure per symbol for legacy single-entry flow.
+        # Opposite side is allowed to flip (close existing and reopen new
+        # direction on netting accounts). Grid plans intentionally bypass this
+        # gate so they can stage multiple buy/sell ladder levels.
+        if current.side == signal.side:
+            _bump_counter_locked(ENTRY_BLOCK_COUNTS, "same-side-virtual-position")
             return False
-        return True
-    # Keep one directional exposure per symbol. Opposite side is allowed to
-    # flip (close existing and reopen new direction on netting accounts).
-    if current.side == signal.side:
-        _bump_counter_locked(ENTRY_BLOCK_COUNTS, "same-side-virtual-position")
-        return False
-    guard = _entry_guard_locked(signal)
+
+    guard = _entry_guard_locked(signal, extra_positions=extra_positions)
     if not guard.allowed:
         _bump_counter_locked(ENTRY_BLOCK_COUNTS, _bucket_reason(guard.reason))
         logger.info("entry blocked for %s:%s - %s", signal.symbol, signal.side.value, guard.reason)
@@ -159,7 +161,26 @@ def _position_exposures_from_heartbeats_locked() -> list[PositionExposure]:
     return exposures
 
 
-def _risk_snapshot_locked() -> AccountRiskSnapshot:
+def _pending_open_signal_exposures_locked() -> list[PositionExposure]:
+    exposures: list[PositionExposure] = []
+    active_statuses = {SignalStatus.CREATED, SignalStatus.CLAIMED, SignalStatus.EXECUTING}
+    for signal in SIGNALS.values():
+        if signal.action != SignalAction.OPEN or signal.status not in active_statuses:
+            continue
+        reference_price = signal.limit_price
+        exposures.append(
+            PositionExposure(
+                symbol=_symbol_key(signal.symbol),
+                side=signal.side.value,
+                lots=float(signal.lots),
+                entry_price=reference_price,
+                current_price=reference_price,
+            )
+        )
+    return exposures
+
+
+def _risk_snapshot_locked(extra_positions: Optional[list[PositionExposure]] = None) -> AccountRiskSnapshot:
     latest_heartbeat = max(HEARTBEATS.values(), key=lambda hb: hb.timestamp, default=None)
     balance = float(latest_heartbeat.balance) if latest_heartbeat and latest_heartbeat.balance is not None else settings.risk.starting_balance
     equity = float(latest_heartbeat.equity) if latest_heartbeat and latest_heartbeat.equity is not None else balance
@@ -171,14 +192,18 @@ def _risk_snapshot_locked() -> AccountRiskSnapshot:
             for symbol, position in VIRTUAL_POSITIONS.items()
         ]
 
+    positions.extend(_pending_open_signal_exposures_locked())
+    if extra_positions:
+        positions.extend(extra_positions)
+
     return AccountRiskSnapshot(balance=balance, equity=equity, positions=positions)
 
 
-def _entry_guard_locked(signal: Signal):
+def _entry_guard_locked(signal: Signal, extra_positions: Optional[list[PositionExposure]] = None):
     return evaluate_entry_guard(
         symbol=_symbol_key(signal.symbol),
         side=signal.side.value,
-        snapshot=_risk_snapshot_locked(),
+        snapshot=_risk_snapshot_locked(extra_positions=extra_positions),
         risk=settings.risk,
     )
 
@@ -375,6 +400,50 @@ def _update_virtual_position_on_fill(report: ExecutionReport, signal: Signal) ->
     VIRTUAL_POSITIONS.pop(symbol, None)
 
 
+def _grid_level_to_signal(plan: GridPlan, level, grid_id: str) -> Signal:
+    side = SignalSide(level.side.lower())
+    stop_loss = getattr(level, "stop_loss", None)
+    take_profit = getattr(level, "take_profit", None)
+    return Signal(
+        symbol=_symbol_key(plan.symbol),
+        side=side,
+        order_type="limit",
+        action=SignalAction.OPEN,
+        lots=float(level.lots),
+        limit_price=float(level.price),
+        stop_loss=float(stop_loss) if stop_loss is not None else None,
+        take_profit=float(take_profit) if take_profit is not None else None,
+        confidence=float(plan.score),
+        reason=f"grid-strike:{plan.reason}",
+        grid_id=grid_id,
+        grid_index=int(level.index),
+    )
+
+
+def _grid_plan_signals_locked(plan: GridPlan) -> list[Signal]:
+    created: list[Signal] = []
+    staged_positions: list[PositionExposure] = []
+    grid_id = f"{_symbol_key(plan.symbol)}-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+
+    for level in [*plan.buy_levels, *plan.sell_levels]:
+        signal = _grid_level_to_signal(plan, level, grid_id)
+        projected = staged_positions + [
+            PositionExposure(
+                symbol=_symbol_key(signal.symbol),
+                side=signal.side.value,
+                lots=float(signal.lots),
+                entry_price=signal.limit_price,
+                current_price=signal.limit_price,
+            )
+        ]
+        if not _should_enqueue_signal_locked(signal, extra_positions=projected):
+            continue
+        SIGNALS[signal.id] = signal
+        staged_positions.append(projected[-1])
+        created.append(signal)
+    return created
+
+
 def _run_strategy_scan_once() -> list[Signal]:
     created: list[Signal] = []
     for symbol in settings.market_data.symbols:
@@ -384,17 +453,25 @@ def _run_strategy_scan_once() -> list[Signal]:
                 period=settings.market_data.candles_period,
                 interval=settings.market_data.candles_interval,
             )
+
+            if settings.grid_strike.enabled:
+                candidate = score_grid_candidate(symbol, candles, settings.grid_strike)
+                if candidate.tradeable:
+                    plan = build_grid_plan(candidate, mid_price=candidate.mid_price, settings=settings.grid_strike)
+                    with STATE_LOCK:
+                        planned = _grid_plan_signals_locked(plan)
+                    created.extend(planned)
+                    continue
+                else:
+                    with STATE_LOCK:
+                        _bump_counter_locked(GRID_REJECTION_COUNTS, _bucket_reason(candidate.reason))
+
             signal = simple_signal(symbol, candles, settings)
             if signal is None:
                 continue
 
             signal.symbol = _symbol_key(signal.symbol)
             with STATE_LOCK:
-                guard = _entry_guard_locked(signal)
-                if not guard.allowed:
-                    _bump_counter_locked(ENTRY_BLOCK_COUNTS, _bucket_reason(guard.reason))
-                    logger.info("scan skipped %s:%s - %s", signal.symbol, signal.side.value, guard.reason)
-                    continue
                 if not _should_enqueue_signal_locked(signal):
                     continue
                 SIGNALS[signal.id] = signal
@@ -550,6 +627,7 @@ def create_signal_from_grid(req: CreateSignalRequest = Body(...)) -> Signal:
         action=SignalAction(req.action.lower()),
         lots=lots,
         position_ticket=req.position_ticket,
+        limit_price=req.limit_price,
         stop_loss=req.stop_loss,
         take_profit=req.take_profit,
         confidence=0.95,
