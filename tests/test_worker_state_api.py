@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 
 from fastapi.testclient import TestClient
 import pytest
@@ -315,6 +316,48 @@ def test_heartbeat_auto_close_uses_basket_stale_and_cooldown_guards(monkeypatch)
         if row["action"] == "open" and row["reason"] == f"auto-reopen-after-close:{close_signal['id']}"
     ]
     assert reopened == []
+
+
+def test_heartbeat_auto_close_never_stale_closes_losing_positions(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(server.settings.mt5_worker, "basket_take_profit_usd", 0.0)
+    monkeypatch.setattr(server.settings.mt5_worker, "stale_position_minutes", 60)
+    monkeypatch.setattr(server.settings.mt5_worker, "auto_close_profit_pct", 50.0)
+    monkeypatch.setattr(server.settings.mt5_worker, "auto_close_loss_pct", 0.0)
+    monkeypatch.setattr(server.settings.mt5_worker, "volatility_spike_close_pct", 0.0)
+    caplog.set_level("INFO")
+
+    client = TestClient(server.app)
+    opened_at = (server.datetime.now(server.timezone.utc) - timedelta(hours=5)).isoformat()
+    heartbeat_payload = {
+        "worker_id": "windows-mt5-atlas-01",
+        "mt5_connected": True,
+        "account_login": 123456,
+        "broker": "AtlasFunded",
+        "balance": 400000.0,
+        "equity": 399995.0,
+        "open_positions": 1,
+        "positions": [
+            {
+                "ticket": 445566,
+                "symbol": "BTCUSD",
+                "side": "buy",
+                "lots": 0.01,
+                "entry_price": 65000.0,
+                "current_price": 64950.0,
+                "profit": -5.0,
+                "swap": 0.0,
+                "commission": 0.0,
+                "opened_at": opened_at,
+            }
+        ],
+    }
+
+    hb_resp = client.post("/api/worker/heartbeat", params=_token_param(), json=heartbeat_payload)
+    assert hb_resp.status_code == 200
+
+    close_signals = [row for row in client.get("/api/signals").json() if row["action"] == "close"]
+    assert close_signals == []
+    assert any("reason=stale-loss-blocked" in message for message in caplog.messages)
 
 
 def test_diagnostics_summary_exposes_counters_and_cooldowns() -> None:

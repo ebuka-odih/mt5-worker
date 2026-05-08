@@ -15,7 +15,7 @@ Designed for **Atlas Funded** $400k challenge (4% DD, 10% monthly target).
         ▲
         │ Cloudflare Tunnel
         ▼
-https://jake-divisions-vanilla-cradle.trycloudflare.com
+https://<fresh-cloudflare-tunnel>.trycloudflare.com
 ```
 
 ## VPS Brain Setup
@@ -75,18 +75,10 @@ percent, and age in minutes for that worker.
 
 ### Step-by-Step Setup
 
-**1. Copy the worker files to Windows:**
+**1. Clone the repo on Windows:**
 
 ```cmd
-mkdir C:\mt5-worker
-copy \\vps\path\mt5-worker\windows_mt5_worker.py C:\mt5-worker\
-copy \\vps\path\mt5-worker\requirements.txt C:\mt5-worker\
-copy \\vps\path\mt5-worker\.env.example C:\mt5-worker\
-```
-
-Or clone the repo on Windows:
-```cmd
-git clone https://github.com/YOUR_USER/forex-mt5-bot.git C:\forex-mt5-bot
+git clone https://github.com/ebuka-odih/mt5-worker.git C:\forex-mt5-bot
 cd C:\forex-mt5-bot\mt5-worker
 ```
 
@@ -110,10 +102,10 @@ Edit `.env` with these values:
 
 ```env
 # VPS Brain URL (Cloudflare tunnel — refresh if stale)
-VPS_API_BASE=https://jake-divisions-vanilla-cradle.trycloudflare.com
+VPS_API_BASE=https://<fresh-cloudflare-tunnel>.trycloudflare.com
 
-# Worker auth token (MUST match VPS config)
-WORKER_TOKEN=991403c231352264deb0d3e949324189eff63f08ede89901d0dc22a3e152a693
+# Worker auth token (MUST match VPS config; do not commit real tokens)
+WORKER_TOKEN=<set-to-your-worker-token>
 
 # Worker ID (for multi-worker setups)
 WORKER_ID=windows-mt5-local-01
@@ -131,7 +123,7 @@ venv\Scripts\python windows_mt5_worker.py
 You should see:
 ```
 [INFO] mt5-worker: Starting Windows MT5 worker
-[INFO] mt5-worker:   VPS API:   https://jake-divisions-vanilla-cradle.trycloudflare.com
+[INFO] mt5-worker:   VPS API:   https://<fresh-cloudflare-tunnel>.trycloudflare.com
 [INFO] mt5-worker:   Dry Run:   True
 [INFO] mt5-worker: MT5 connected: login=XXXXX, server=AtlasFunded, balance=400000.0
 ```
@@ -144,6 +136,17 @@ DRY_RUN=false
 ```
 
 Restart the worker.
+
+**6. Pull future updates on Windows:**
+
+```cmd
+cd C:\forex-mt5-bot
+git pull
+cd mt5-worker
+venv\Scripts\python windows_mt5_worker.py
+```
+
+If you run the worker via NSSM or Task Scheduler, restart that service/task after `git pull`.
 
 ### Running in Background
 
@@ -204,11 +207,11 @@ Key files:
 
 ## Troubleshooting
 
-For deployment and pre-live checks, use [docs/DEPLOYMENT_CHECKLIST.md](/Users/gnosis/Herd/mt5-worker/docs/DEPLOYMENT_CHECKLIST.md).
+For deployment and pre-live checks, use `docs/DEPLOYMENT_CHECKLIST.md`.
 
 ### Worker can't connect to VPS
 ```cmd
-curl https://jake-divisions-vanilla-cradle.trycloudflare.com/health
+curl https://<fresh-cloudflare-tunnel>.trycloudflare.com/health
 ```
 If tunnel is stale, regenerate on VPS: `cloudflared tunnel --url http://localhost:8780`
 

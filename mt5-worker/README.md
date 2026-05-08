@@ -1,6 +1,6 @@
 # Windows MT5 Worker
 
-A lightweight Windows worker that connects MetaTrader 5 to the VPS grid-trader brain. The worker polls the VPS for trading signals and executes them on the local MT5 terminal.
+A lightweight Windows worker that connects MetaTrader 5 to the VPS forex brain. The worker polls the VPS for trading signals and executes them on the local MT5 terminal.
 
 ## Quick Start
 
@@ -90,16 +90,7 @@ To test the full signal flow without placing real orders:
 From the VPS, you can send a test signal via the API:
 
 ```bash
-curl -X POST https://your-tunnel-url/api/worker/test-signal \
-  -H "Content-Type: application/json" \
-  -d '{
-    "worker_id": "windows-mt5-local-01",
-    "symbol": "BTCUSD",
-    "side": "buy",
-    "lots": 0.01,
-    "stop_loss": 0,
-    "take_profit": 0
-  }'
+curl -X POST "https://your-tunnel-url/api/worker/test-signal?symbol=BTCUSD&side=buy&lots=0.01&worker_id=windows-mt5-local-01"
 ```
 
 The worker will:
@@ -194,7 +185,7 @@ The VPS brain can now auto-generate signals in live mode. To use it safely:
 
 ### VPS Connection Issues
 
-- Verify the Cloudflare tunnel is running on VPS: `curl https://your-tunnel-url/api/health`
+- Verify the Cloudflare tunnel is running on VPS: `curl https://your-tunnel-url/health`
 - Check the token matches in both `.env` files
 - Ensure port 443 is not blocked by firewall
 

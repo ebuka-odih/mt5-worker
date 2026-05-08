@@ -54,7 +54,7 @@ grid_strike:
   enabled: true
   min_score: 0.55
   min_range_pct: 1.00
-  max_range_pct: 8.00
+  max_range_pct: 20.00
   max_trend_ratio: 0.75
   lookback_candles: 720
   levels_each_side: 500
@@ -91,7 +91,7 @@ mt5_worker:
   auto_close_profit_pct: 2.0
   auto_close_loss_pct: 1.5
   basket_take_profit_usd: 500.0
-  stale_position_minutes: 360
+  stale_position_minutes: 0
   volatility_spike_close_pct: 4.0
   reentry_cooldown_seconds: 300
   auto_reopen_after_close: true

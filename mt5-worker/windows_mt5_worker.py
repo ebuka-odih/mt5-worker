@@ -157,16 +157,42 @@ def _position_side(position_type: Any) -> str:
     return "buy"
 
 
+def _local_utc_offset_seconds() -> int:
+    now_local = datetime.now().astimezone()
+    offset = now_local.utcoffset()
+    return int(offset.total_seconds()) if offset is not None else 0
+
+
+def _normalize_opened_at(ts: Any) -> Optional[str]:
+    if ts in (None, ""):
+        return None
+    try:
+        opened_at = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+    except Exception:
+        return None
+
+    now_utc = datetime.now(timezone.utc)
+    if opened_at > now_utc:
+        local_offset_seconds = _local_utc_offset_seconds()
+        if local_offset_seconds > 0:
+            adjusted = datetime.fromtimestamp(int(opened_at.timestamp() - local_offset_seconds), tz=timezone.utc)
+            if adjusted <= now_utc:
+                logger.warning(
+                    "normalized future-shifted MT5 position time raw_ts=%s opened_at=%s adjusted_opened_at=%s local_offset_seconds=%s",
+                    ts,
+                    opened_at.isoformat(),
+                    adjusted.isoformat(),
+                    local_offset_seconds,
+                )
+                opened_at = adjusted
+
+    return opened_at.isoformat()
+
+
 def _serialize_positions(positions: list[Any]) -> list[dict[str, Any]]:
     serialized: list[dict[str, Any]] = []
     for pos in positions:
-        opened_at = None
-        ts = getattr(pos, "time", None)
-        if ts:
-            try:
-                opened_at = datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
-            except Exception:
-                opened_at = None
+        opened_at = _normalize_opened_at(getattr(pos, "time", None))
 
         serialized.append(
             {

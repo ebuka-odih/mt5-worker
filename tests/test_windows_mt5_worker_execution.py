@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +14,8 @@ WORKER_PATH = PROJECT_ROOT / "mt5-worker" / "windows_mt5_worker.py"
 class FakeMT5:
     TRADE_ACTION_DEAL = 1
     TRADE_ACTION_PENDING = 5
+    POSITION_TYPE_BUY = 0
+    POSITION_TYPE_SELL = 1
     ORDER_TYPE_BUY = 0
     ORDER_TYPE_SELL = 1
     ORDER_TYPE_BUY_LIMIT = 2
@@ -127,3 +130,34 @@ def test_execute_signal_places_sell_limit_pending_order(monkeypatch):
     assert mt5.last_request["type_filling"] == mt5.ORDER_FILLING_RETURN
     assert "grid:gbpusd-grid-9:1" in mt5.last_request["comment"]
     assert reports and reports[0][0][1] == "filled"
+
+
+def test_serialize_positions_normalizes_future_shifted_mt5_times(monkeypatch, caplog):
+    worker = _load_worker_module(monkeypatch, FakeMT5())
+    monkeypatch.setattr(worker, "_local_utc_offset_seconds", lambda: 3 * 3600)
+    caplog.set_level("WARNING")
+
+    now_utc = datetime.now(timezone.utc)
+    shifted_epoch = int(now_utc.timestamp()) + (3 * 3600)
+    positions = [
+        SimpleNamespace(
+            ticket=77,
+            symbol="BTCUSD",
+            type=worker.mt5.ORDER_TYPE_BUY,
+            volume=0.01,
+            price_open=65000.0,
+            price_current=65010.0,
+            profit=1.0,
+            swap=0.0,
+            commission=0.0,
+            time=shifted_epoch,
+            comment="grid:test",
+            magic=552501,
+        )
+    ]
+
+    serialized = worker._serialize_positions(positions)
+
+    opened_at = datetime.fromisoformat(serialized[0]["opened_at"])
+    assert abs((opened_at - now_utc).total_seconds()) < 5
+    assert any("normalized future-shifted MT5 position time" in message for message in caplog.messages)

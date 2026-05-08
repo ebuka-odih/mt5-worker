@@ -267,6 +267,7 @@ def _enqueue_auto_close_signals_locked(worker_id: str, profit_pct: float) -> lis
         net_profit = _position_net_profit(position)
         age_minutes = _position_age_minutes(position)
         adverse_move_pct = max(-position_profit_pct, 0.0)
+        stale_threshold_hit = stale_minutes > 0 and age_minutes is not None and age_minutes >= stale_minutes
 
         if position_profit_pct >= profit_pct:
             close_reason = f"net-tp-hit:{position_profit_pct:.4f}% >= {profit_pct:.4f}%"
@@ -274,12 +275,24 @@ def _enqueue_auto_close_signals_locked(worker_id: str, profit_pct: float) -> lis
             close_reason = f"net-sl-hit:{adverse_move_pct:.4f}% >= {close_loss_pct:.4f}%"
         elif basket_take_profit > 0 and basket_net_profit >= basket_take_profit:
             close_reason = f"basket-tp-hit:{basket_net_profit:.2f} >= {basket_take_profit:.2f}"
-        elif stale_minutes > 0 and age_minutes is not None and age_minutes >= stale_minutes:
+        elif stale_threshold_hit and net_profit >= 0:
             close_reason = f"stale-exit:{age_minutes:.1f}m >= {stale_minutes}m"
         elif emergency_pct > 0 and adverse_move_pct >= emergency_pct:
             close_reason = f"volatility-spike:{adverse_move_pct:.4f}% >= {emergency_pct:.4f}%"
 
         if close_reason is None:
+            if stale_threshold_hit and net_profit < 0:
+                logger.info(
+                    "auto-close blocked worker=%s symbol=%s ticket=%s reason=stale-loss-blocked age_minutes=%.1f stale_minutes=%s net_pnl=%.2f profit_pct=%.4f adverse_move_pct=%.4f",
+                    worker_id,
+                    position.symbol,
+                    ticket,
+                    age_minutes,
+                    stale_minutes,
+                    net_profit,
+                    position_profit_pct,
+                    adverse_move_pct,
+                )
             continue
 
         close_side = SignalSide.SELL if position.side == SignalSide.BUY else SignalSide.BUY
@@ -297,12 +310,17 @@ def _enqueue_auto_close_signals_locked(worker_id: str, profit_pct: float) -> lis
         SIGNALS[close_signal.id] = close_signal
         _bump_counter_locked(CLOSE_REASON_COUNTS, _bucket_reason(close_reason))
         logger.info(
-            "auto-close queued worker=%s symbol=%s ticket=%s reason=%s basket_net_pnl=%.2f",
+            "auto-close queued worker=%s symbol=%s ticket=%s reason=%s basket_net_pnl=%.2f net_pnl=%.2f profit_pct=%.4f adverse_move_pct=%.4f age_minutes=%s stale_minutes=%s",
             worker_id,
             position.symbol,
             ticket,
             close_reason,
             basket_net_profit,
+            net_profit,
+            position_profit_pct,
+            adverse_move_pct,
+            f"{age_minutes:.1f}" if age_minutes is not None else "n/a",
+            stale_minutes,
         )
         created.append(close_signal)
     return created
