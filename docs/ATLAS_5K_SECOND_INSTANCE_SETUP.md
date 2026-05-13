@@ -56,11 +56,23 @@ notepad .env
 ```
 
 3. Set these values in `.env`:
-   - `VPS_API_BASE` = the current Atlas 5k tunnel or direct VPS URL for port `8782`
+   - `VPS_API_BASE=https://pushed-protection-sample-regulations.trycloudflare.com`
    - `WORKER_TOKEN` = the same token you placed in `config/settings.atlas-5k.yaml`
    - `WORKER_ID=windows-mt5-atlas-5k-01`
    - `MT5_MAGIC=552701`
    - `DRY_RUN=false` only when you want live execution on the new 5k account
+
+   Example:
+   ```env
+   VPS_API_BASE=https://pushed-protection-sample-regulations.trycloudflare.com
+   WORKER_TOKEN=<same-token-as-config/settings.atlas-5k.yaml>
+   WORKER_ID=windows-mt5-atlas-5k-01
+   DRY_RUN=false
+   MT5_MAGIC=552701
+   POLL_SECONDS=1
+   HEARTBEAT_SECONDS=10
+   REQUEST_TIMEOUT_MS=5000
+   ```
 
 4. Ensure the MT5 terminal is logged into the **new Atlas 5k funded account**.
 5. Start the worker:
