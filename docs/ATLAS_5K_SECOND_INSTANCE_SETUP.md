@@ -1,0 +1,83 @@
+# Atlas 5k second instance setup
+
+This profile runs **alongside** the existing MT5 brain without touching the old instance.
+
+## Files
+- VPS config: `config/settings.atlas-5k.yaml`
+- VPS compose stack: `docker-compose.atlas-5k.yml`
+- Private worker env: `mt5-worker/.env.atlas-5k`
+- Safe template to send elsewhere: `mt5-worker/.env.atlas-5k.example`
+
+## Isolation values
+- API port: `8782`
+- Container name: `forex-brain-atlas-5k`
+- Data dir: `./data-atlas-5k`
+- MT5 magic number: `552701`
+- MT5 comment prefix: `vps_forex_brain_atlas_5k`
+- Worker token: set the same value in `config/settings.atlas-5k.yaml` and the Windows worker `.env`
+
+## Atlas Instant rule alignment used here
+- Starting balance: `$5,000`
+- Internal daily loss budget: `$90`
+- Internal max daily loss cap: `2%`
+- Atlas max daily loss rule: `3%`
+- Atlas max trailing drawdown rule: `5%`
+- Single-worker symbol set: `BTCUSD` only
+- Leverage cap: `10x`
+
+## Behavior choices
+- **Positive PnL auto-close remains enabled** via `auto_close_profit_pct: 0.6`
+- **Negative DD auto-close is effectively disabled** via `auto_close_loss_pct: 99.0`
+  so downside closure remains manual unless you change that threshold.
+- Basket take profit is also set at `$30`.
+
+## VPS launch
+```bash
+docker compose -f docker-compose.atlas-5k.yml up -d --build
+curl http://127.0.0.1:8782/health
+```
+
+## New computer / Windows worker setup
+This is for the **new Atlas 5k login account**, not the old funded login. Leave the old worker/service running on its existing profile.
+
+1. Pull the latest repo on the Windows machine:
+
+```cmd
+cd C:\forex-mt5-bot
+git pull
+cd mt5-worker
+```
+
+2. Copy the safe template to `.env` and edit it:
+
+```cmd
+copy .env.atlas-5k.example .env
+notepad .env
+```
+
+3. Set these values in `.env`:
+   - `VPS_API_BASE` = the current Atlas 5k tunnel or direct VPS URL for port `8782`
+   - `WORKER_TOKEN` = the same token you placed in `config/settings.atlas-5k.yaml`
+   - `WORKER_ID=windows-mt5-atlas-5k-01`
+   - `MT5_MAGIC=552701`
+   - `DRY_RUN=false` only when you want live execution on the new 5k account
+
+4. Ensure the MT5 terminal is logged into the **new Atlas 5k funded account**.
+5. Start the worker:
+
+```cmd
+cd C:\mt5-worker
+venv\Scripts\python windows_mt5_worker.py
+```
+
+## Verification
+- VPS health: `curl http://127.0.0.1:8782/health`
+- Worker log should show `Worker ID: windows-mt5-atlas-5k-01`
+- Worker log should show `MT5 connected`
+- Orders for this account should carry magic `552701`
+- Existing instance continues using port `8780` / magic `552501`
+
+## Deployment note
+- Do **not** stop or reconfigure the original Atlas worker that is already tied to the old login.
+- The new 5k login should use only the `atlas-5k` profile files, port `8782`, magic `552701`, and worker ID `windows-mt5-atlas-5k-01`.
+- If the Windows box runs the worker as NSSM or Task Scheduler, restart only the new Atlas 5k worker after updating `.env`.

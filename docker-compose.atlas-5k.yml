@@ -1,0 +1,16 @@
+services:
+  brain:
+    build: .
+    container_name: forex-brain-atlas-5k
+    ports:
+      - "8782:8782"
+    volumes:
+      - ./config/settings.atlas-5k.yaml:/app/config/settings.yaml:ro
+      - ./data-atlas-5k:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8782/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

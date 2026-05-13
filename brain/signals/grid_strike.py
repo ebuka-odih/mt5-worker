@@ -7,6 +7,25 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 
+CRYPTO_PIP_SIZES: dict[str, float] = {
+    "BTC": 1.0,
+    "XBT": 1.0,
+    "ETH": 0.01,
+    "SOL": 0.01,
+    "BNB": 0.01,
+    "XRP": 0.0001,
+}
+
+CRYPTO_PRICE_DECIMALS: dict[str, int] = {
+    "BTC": 2,
+    "XBT": 2,
+    "ETH": 2,
+    "SOL": 3,
+    "BNB": 2,
+    "XRP": 4,
+}
+
+
 class GridStrikeSettings(BaseModel):
     """Settings for the Forex Grid Strike scalping filter.
 
@@ -33,9 +52,29 @@ class GridStrikeSettings(BaseModel):
     session_end_hour_utc: int = 22
     max_spread_pips: float = 0.0
     symbol_lots: dict[str, float] = Field(default_factory=dict)
+    symbol_grid_overrides: dict[str, dict[str, float | int | None]] = Field(default_factory=dict)
 
     def get_lots(self, symbol: str) -> float:
         return self.symbol_lots.get(symbol.upper(), self.order_lots)
+
+    def get_symbol_grid_override(self, symbol: str) -> dict[str, float | int | None]:
+        return self.symbol_grid_overrides.get(symbol.upper(), {})
+
+    def get_levels_each_side(self, symbol: str) -> int:
+        override = self.get_symbol_grid_override(symbol)
+        value = override.get("levels_each_side")
+        if value is None:
+            return self.levels_each_side
+        return max(int(value), 1)
+
+    def get_price_bounds(self, symbol: str) -> tuple[float | None, float | None]:
+        override = self.get_symbol_grid_override(symbol)
+        lower = override.get("lower_bound")
+        upper = override.get("upper_bound")
+        return (
+            float(lower) if lower is not None else None,
+            float(upper) if upper is not None else None,
+        )
 
 
 class GridLevel(BaseModel):
@@ -74,15 +113,17 @@ class GridPlan(BaseModel):
 
 def pip_size(symbol: str) -> float:
     normalized = symbol.upper().replace("/", "")
-    if normalized.startswith(("BTC", "XBT")):
-        return 1.0
+    for prefix, value in CRYPTO_PIP_SIZES.items():
+        if normalized.startswith(prefix):
+            return value
     return 0.01 if normalized.endswith("JPY") else 0.0001
 
 
-def _round_price(symbol: str, price: float) -> float:
+def round_price(symbol: str, price: float) -> float:
     normalized = symbol.upper().replace("/", "")
-    if normalized.startswith(("BTC", "XBT")):
-        return round(price, 2)
+    for prefix, decimals in CRYPTO_PRICE_DECIMALS.items():
+        if normalized.startswith(prefix):
+            return round(price, decimals)
     return round(price, 3 if normalized.endswith("JPY") else 5)
 
 
@@ -210,14 +251,14 @@ def score_grid_candidate(
     )
 
     return GridStrikeCandidate(
-        symbol=symbol.upper(),
-        score=score,
-        tradeable=tradeable,
-        market_regime=regime,
-        mid_price=_round_price(symbol, last),
-        range_pct=round(range_pct, 4),
-        trend_ratio=round(trend_ratio, 4),
-        atr_pips=round(atr_pips, 2),
+            symbol=symbol.upper(),
+            score=score,
+            tradeable=tradeable,
+            market_regime=regime,
+            mid_price=round_price(symbol, last),
+            range_pct=round(range_pct, 4),
+            trend_ratio=round(trend_ratio, 4),
+            atr_pips=round(atr_pips, 2),
         spread_pips=round(spread_pips, 2),
         grid_spacing_pips=round(spacing_pips, 2),
         reason=reason,
@@ -235,22 +276,49 @@ def build_grid_plan(
     step = candidate.grid_spacing_pips * pip
 
     lots = settings.get_lots(candidate.symbol)
-    buy_levels = [
-        GridLevel(index=i, side="buy", price=_round_price(candidate.symbol, mid - (step * i)), lots=lots)
-        for i in range(1, settings.levels_each_side + 1)
-    ]
-    sell_levels = [
-        GridLevel(index=i, side="sell", price=_round_price(candidate.symbol, mid + (step * i)), lots=lots)
-        for i in range(1, settings.levels_each_side + 1)
-    ]
+    levels_each_side = settings.get_levels_each_side(candidate.symbol)
+    lower_bound, upper_bound = settings.get_price_bounds(candidate.symbol)
+
+    if lower_bound is not None and lower_bound < mid:
+        buy_step = (mid - lower_bound) / levels_each_side
+        buy_levels = [
+            GridLevel(index=i, side="buy", price=round_price(candidate.symbol, mid - (buy_step * i)), lots=lots)
+            for i in range(1, levels_each_side + 1)
+        ]
+    else:
+        buy_levels = [
+            GridLevel(index=i, side="buy", price=round_price(candidate.symbol, mid - (step * i)), lots=lots)
+            for i in range(1, levels_each_side + 1)
+        ]
+
+    if upper_bound is not None and upper_bound > mid:
+        sell_step = (upper_bound - mid) / levels_each_side
+        sell_levels = [
+            GridLevel(index=i, side="sell", price=round_price(candidate.symbol, mid + (sell_step * i)), lots=lots)
+            for i in range(1, levels_each_side + 1)
+        ]
+    else:
+        sell_levels = [
+            GridLevel(index=i, side="sell", price=round_price(candidate.symbol, mid + (step * i)), lots=lots)
+            for i in range(1, levels_each_side + 1)
+        ]
+
+    effective_spacing_pips = candidate.grid_spacing_pips
+    deltas: list[float] = []
+    if buy_levels:
+        deltas.append(abs(mid - buy_levels[0].price) / pip)
+    if sell_levels:
+        deltas.append(abs(sell_levels[0].price - mid) / pip)
+    if deltas:
+        effective_spacing_pips = round(sum(deltas) / len(deltas), 2)
 
     return GridPlan(
         symbol=candidate.symbol,
         score=candidate.score,
-        mid_price=_round_price(candidate.symbol, mid),
+        mid_price=round_price(candidate.symbol, mid),
         lower_bound=buy_levels[-1].price,
         upper_bound=sell_levels[-1].price,
-        grid_spacing_pips=candidate.grid_spacing_pips,
+        grid_spacing_pips=effective_spacing_pips,
         lots_per_level=lots,
         buy_levels=buy_levels,
         sell_levels=sell_levels,

@@ -76,10 +76,30 @@ class GridStrikeSettings(BaseModel):
     session_end_hour_utc: int = 22
     max_spread_pips: float = 0.0
     symbol_lots: dict[str, float] = Field(default_factory=dict)
+    symbol_grid_overrides: dict[str, dict[str, float | int | None]] = Field(default_factory=dict)
 
     def get_lots(self, symbol: str) -> float:
         """Return per-symbol lot size, falling back to order_lots."""
         return self.symbol_lots.get(symbol.upper(), self.order_lots)
+
+    def get_symbol_grid_override(self, symbol: str) -> dict[str, float | int | None]:
+        return self.symbol_grid_overrides.get(symbol.upper(), {})
+
+    def get_levels_each_side(self, symbol: str) -> int:
+        override = self.get_symbol_grid_override(symbol)
+        value = override.get("levels_each_side")
+        if value is None:
+            return self.levels_each_side
+        return max(int(value), 1)
+
+    def get_price_bounds(self, symbol: str) -> tuple[float | None, float | None]:
+        override = self.get_symbol_grid_override(symbol)
+        lower = override.get("lower_bound")
+        upper = override.get("upper_bound")
+        return (
+            float(lower) if lower is not None else None,
+            float(upper) if upper is not None else None,
+        )
 
 
 class BasketProfitLockSettings(BaseModel):

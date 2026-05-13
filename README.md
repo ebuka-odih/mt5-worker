@@ -67,6 +67,19 @@ percent, and age in minutes for that worker.
 
 ## Windows MT5 Worker Setup
 
+### Atlas 5k second login / second instance
+
+If you are bringing up the **new Atlas 5k login** while keeping the old Atlas login live, use the isolated second-instance profile:
+
+- VPS config: `config/settings.atlas-5k.yaml`
+- VPS compose: `docker-compose.atlas-5k.yml`
+- Windows template: `mt5-worker/.env.atlas-5k.example`
+- API port: `8782`
+- MT5 magic: `552701`
+- Worker ID: `windows-mt5-atlas-5k-01`
+
+Do **not** replace the old worker `.env` or stop the original port `8780` service. Full deployment steps are in `docs/ATLAS_5K_SECOND_INSTANCE_SETUP.md`.
+
 ### Prerequisites
 
 - Windows 10/11 with Python 3.9+

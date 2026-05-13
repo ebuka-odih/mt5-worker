@@ -5,6 +5,7 @@ from typing import Optional
 
 import pandas as pd
 
+from brain.signals.grid_strike import pip_size, round_price
 from shared.models import Signal, SignalSide
 from shared.settings import Settings
 
@@ -16,10 +17,6 @@ def rsi(series: pd.Series, period: int = 14) -> float:
     rs = gain / loss.replace(0, pd.NA)
     value = 100 - (100 / (1 + rs.iloc[-1]))
     return float(value) if pd.notna(value) else 50.0
-
-
-def pip_size(symbol: str) -> float:
-    return 0.01 if symbol.upper().endswith("JPY") else 0.0001
 
 
 def simple_signal(symbol: str, candles: pd.DataFrame, settings: Settings) -> Optional[Signal]:
@@ -68,8 +65,8 @@ def simple_signal(symbol: str, candles: pd.DataFrame, settings: Settings) -> Opt
         symbol=symbol.upper(),
         side=side,
         lots=settings.grid_strike.get_lots(symbol.upper()),
-        stop_loss=round(sl, 5),
-        take_profit=round(tp, 5),
+        stop_loss=round_price(symbol, sl),
+        take_profit=round_price(symbol, tp),
         confidence=round(confidence, 3),
         reason=reason + f" @ {datetime.now(timezone.utc).isoformat()}",
     )

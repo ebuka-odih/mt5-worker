@@ -4,6 +4,12 @@ A lightweight Windows worker that connects MetaTrader 5 to the VPS forex brain. 
 
 ## Quick Start
 
+### Atlas 5k second-login deployment note
+
+For the **new Atlas 5k login account**, use the dedicated template `mt5-worker/.env.atlas-5k.example` and point it at the Atlas 5k VPS profile on port `8782`.
+
+Keep the old login's worker/service running separately. Do not overwrite the existing live `.env` used by the old account.
+
 ### Prerequisites
 
 - Windows 10/11 with Python 3.9+
