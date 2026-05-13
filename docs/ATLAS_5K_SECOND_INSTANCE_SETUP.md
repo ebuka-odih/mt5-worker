@@ -33,7 +33,7 @@ This profile runs **alongside** the existing MT5 brain without touching the old 
 
 ## VPS launch
 ```bash
-docker compose -f docker-compose.atlas-5k.yml up -d --build
+docker compose -p atlas-5k -f docker-compose.atlas-5k.yml up -d --build
 curl http://127.0.0.1:8782/health
 ```
 
@@ -66,7 +66,7 @@ notepad .env
 5. Start the worker:
 
 ```cmd
-cd C:\mt5-worker
+cd C:\forex-mt5-bot\mt5-worker
 venv\Scripts\python windows_mt5_worker.py
 ```
 
@@ -81,3 +81,4 @@ venv\Scripts\python windows_mt5_worker.py
 - Do **not** stop or reconfigure the original Atlas worker that is already tied to the old login.
 - The new 5k login should use only the `atlas-5k` profile files, port `8782`, magic `552701`, and worker ID `windows-mt5-atlas-5k-01`.
 - If the Windows box runs the worker as NSSM or Task Scheduler, restart only the new Atlas 5k worker after updating `.env`.
+- Use the dedicated compose project name `atlas-5k` so compose does not try to replace the original `forex-brain` stack.

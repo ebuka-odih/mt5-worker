@@ -10,6 +10,8 @@ For the **new Atlas 5k login account**, use the dedicated template `mt5-worker/.
 
 Keep the old login's worker/service running separately. Do not overwrite the existing live `.env` used by the old account.
 
+If the repo is checked out at `C:\forex-mt5-bot`, start the new worker from `C:\forex-mt5-bot\mt5-worker` so it uses the new Atlas 5k `.env` instead of the old worker folder.
+
 ### Prerequisites
 
 - Windows 10/11 with Python 3.9+

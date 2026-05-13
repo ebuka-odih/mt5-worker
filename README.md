@@ -80,6 +80,12 @@ If you are bringing up the **new Atlas 5k login** while keeping the old Atlas lo
 
 Do **not** replace the old worker `.env` or stop the original port `8780` service. Full deployment steps are in `docs/ATLAS_5K_SECOND_INSTANCE_SETUP.md`.
 
+On the VPS, launch the second instance with its own compose project name so the old stack stays untouched:
+
+```bash
+docker compose -p atlas-5k -f docker-compose.atlas-5k.yml up -d --build
+```
+
 ### Prerequisites
 
 - Windows 10/11 with Python 3.9+

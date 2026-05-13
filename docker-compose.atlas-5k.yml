@@ -2,6 +2,7 @@ services:
   brain:
     build: .
     container_name: forex-brain-atlas-5k
+    command: ["python", "-m", "uvicorn", "brain.api.server:app", "--host", "0.0.0.0", "--port", "8782"]
     ports:
       - "8782:8782"
     volumes:
