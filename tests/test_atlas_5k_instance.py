@@ -31,7 +31,7 @@ def test_atlas_5k_settings_profile_loads_expected_rules() -> None:
     assert settings.grid_strike.grid_spacing == 750.0
     assert settings.grid_strike.take_profit_spacing == 1500.0
     assert settings.grid_strike.stop_loss_spacing == 750.0
-    assert settings.grid_strike.get_lots("BTCUSD") == 0.04
+    assert settings.grid_strike.get_lots("BTCUSD") == 0.01
     assert settings.mt5_worker.magic_number == 552701
     assert settings.mt5_worker.comment_prefix == "vps_forex_brain_atlas_5k"
     assert settings.mt5_worker.auto_close_profit_pct == 0.6

@@ -6,7 +6,7 @@ app:
 api:
   host: 127.0.0.1
   port: 8782
-  worker_token: CHANGE_ME_ATLAS_5K_WORKER_TOKEN
+  worker_token: ea12abb98fa630742d338ba2f58d602ef66bfb14bd942114df5c0da3b6f88ab2
 
 market_data:
   provider: bybit
@@ -67,9 +67,9 @@ grid_strike:
   session_start_hour_utc: 6
   session_end_hour_utc: 22
   max_spread_pips: 0.0
-  order_lots: 0.04
+  order_lots: 0.01
   symbol_lots:
-    BTCUSD: 0.04
+    BTCUSD: 0.01
   symbol_grid_overrides:
     BTCUSD:
       levels_each_side: 30
