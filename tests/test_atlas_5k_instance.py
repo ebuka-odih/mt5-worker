@@ -20,22 +20,24 @@ def test_atlas_5k_settings_profile_loads_expected_rules() -> None:
     assert settings.risk.max_risk_per_trade_pct == 0.6
     assert settings.risk.max_daily_loss_pct == 2.0
     assert settings.risk.max_total_drawdown_pct == 4.0
-    assert settings.risk.default_stop_loss_pips == 750
-    assert settings.risk.default_take_profit_pips == 1500
-    assert settings.risk.risk_per_order == 30.0
-    assert settings.risk.daily_loss_budget == 90.0
+    assert settings.risk.default_stop_loss_pips == 600
+    assert settings.risk.default_take_profit_pips == 1200
+    assert settings.risk.risk_per_order == 7.5
+    assert settings.risk.daily_loss_budget == 75.0
     assert settings.risk.leverage == 10.0
     assert settings.risk.max_margin_usage_pct == 35.0
-    assert settings.strategy.trend_guard_pct == 1.5
-    assert settings.strategy.max_new_orders_per_bar == 2
-    assert settings.grid_strike.grid_spacing == 750.0
-    assert settings.grid_strike.take_profit_spacing == 1500.0
-    assert settings.grid_strike.stop_loss_spacing == 750.0
+    assert settings.strategy.trend_guard_pct == 2.0
+    assert settings.strategy.max_new_orders_per_bar == 1
+    assert settings.grid_strike.levels_each_side == 5
+    assert settings.grid_strike.grid_spacing == 600.0
+    assert settings.grid_strike.take_profit_spacing == 1200.0
+    assert settings.grid_strike.stop_loss_spacing == 600.0
     assert settings.grid_strike.get_lots("BTCUSD") == 0.01
     assert settings.mt5_worker.magic_number == 552701
     assert settings.mt5_worker.comment_prefix == "vps_forex_brain_atlas_5k"
     assert settings.mt5_worker.auto_close_profit_pct == 0.6
-    assert settings.mt5_worker.auto_close_loss_pct == 99.0
+    assert settings.mt5_worker.auto_close_loss_pct == 0.6
+    assert settings.mt5_worker.basket_take_profit_usd == 12.0
 
 
 def test_atlas_5k_compose_file_targets_dedicated_runtime() -> None:

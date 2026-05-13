@@ -18,7 +18,7 @@ This profile runs **alongside** the existing MT5 brain without touching the old 
 
 ## Atlas Instant rule alignment used here
 - Starting balance: `$5,000`
-- Internal daily loss budget: `$90`
+- Internal daily loss budget: `$75`
 - Internal max daily loss cap: `2%`
 - Atlas max daily loss rule: `3%`
 - Atlas max trailing drawdown rule: `5%`
@@ -27,9 +27,18 @@ This profile runs **alongside** the existing MT5 brain without touching the old 
 
 ## Behavior choices
 - **Positive PnL auto-close remains enabled** via `auto_close_profit_pct: 0.6`
-- **Negative DD auto-close is effectively disabled** via `auto_close_loss_pct: 99.0`
-  so downside closure remains manual unless you change that threshold.
-- Basket take profit is also set at `$30`.
+- **Negative DD auto-close is enabled for funded-account protection** via `auto_close_loss_pct: 0.6`
+- Basket take profit is tightened to `$12`.
+
+## Current de-risked 5k live profile
+- `risk_per_order: 7.5`
+- `grid_spacing / TP / SL = 600 / 1200 / 600`
+- `trend_guard_pct: 2.0`
+- `max_new_orders_per_bar: 1`
+- `levels_each_side: 5`
+- `BTCUSD lots: 0.01` *(0.005 was rejected live by MT5 as invalid volume; 0.01 is the accepted floor)*
+
+This is the safer profile for the **new** 5k login. The old login continues on its separate runtime unchanged.
 
 ## VPS launch
 ```bash
