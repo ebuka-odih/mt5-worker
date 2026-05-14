@@ -271,39 +271,71 @@ def build_grid_plan(
     settings: Optional[GridStrikeSettings] = None,
 ) -> GridPlan:
     settings = settings or GridStrikeSettings()
-    mid = float(mid_price if mid_price is not None else candidate.mid_price)
+    default_settings = GridStrikeSettings()
     pip = pip_size(candidate.symbol)
-    step = candidate.grid_spacing_pips * pip
+    mid = mid_price or candidate.last_price
+    normalized_symbol = candidate.symbol.upper().replace("/", "")
+
+    configured_spacing_pips = float(candidate.grid_spacing_pips)
+    if getattr(settings, "grid_spacing", 0.0) > 0:
+        configured_spacing_pips = float(settings.grid_spacing)
+
+    btc_tight_spacing_pips = configured_spacing_pips
+    if normalized_symbol.startswith(("BTC", "XBT")) and candidate.atr_pips > 0:
+        using_default_grid_spacing = abs(float(settings.grid_spacing) - float(default_settings.grid_spacing)) < 1e-9
+        if using_default_grid_spacing:
+            btc_tight_spacing_pips = max(float(candidate.atr_pips) / 2.0, pip)
+
+    step = configured_spacing_pips * pip
 
     lots = settings.get_lots(candidate.symbol)
     levels_each_side = settings.get_levels_each_side(candidate.symbol)
     lower_bound, upper_bound = settings.get_price_bounds(candidate.symbol)
+    active_window = (btc_tight_spacing_pips * pip) * levels_each_side if normalized_symbol.startswith(("BTC", "XBT")) else step * levels_each_side
+    clamp_btc_active_window = (
+        normalized_symbol.startswith(("BTC", "XBT"))
+        and levels_each_side > 1
+        and lower_bound is not None
+        and upper_bound is not None
+        and (mid - lower_bound > active_window or upper_bound - mid > active_window)
+    )
 
-    if lower_bound is not None and lower_bound < mid:
-        buy_step = (mid - lower_bound) / levels_each_side
+    if clamp_btc_active_window:
+        tight_step = btc_tight_spacing_pips * pip
         buy_levels = [
-            GridLevel(index=i, side="buy", price=round_price(candidate.symbol, mid - (buy_step * i)), lots=lots)
+            GridLevel(index=i, side="buy", price=round_price(candidate.symbol, mid - (tight_step * i)), lots=lots)
+            for i in range(1, levels_each_side + 1)
+        ]
+        sell_levels = [
+            GridLevel(index=i, side="sell", price=round_price(candidate.symbol, mid + (tight_step * i)), lots=lots)
             for i in range(1, levels_each_side + 1)
         ]
     else:
-        buy_levels = [
-            GridLevel(index=i, side="buy", price=round_price(candidate.symbol, mid - (step * i)), lots=lots)
-            for i in range(1, levels_each_side + 1)
-        ]
+        if lower_bound is not None and lower_bound < mid:
+            buy_step = (mid - lower_bound) / levels_each_side
+            buy_levels = [
+                GridLevel(index=i, side="buy", price=round_price(candidate.symbol, mid - (buy_step * i)), lots=lots)
+                for i in range(1, levels_each_side + 1)
+            ]
+        else:
+            buy_levels = [
+                GridLevel(index=i, side="buy", price=round_price(candidate.symbol, mid - (step * i)), lots=lots)
+                for i in range(1, levels_each_side + 1)
+            ]
 
-    if upper_bound is not None and upper_bound > mid:
-        sell_step = (upper_bound - mid) / levels_each_side
-        sell_levels = [
-            GridLevel(index=i, side="sell", price=round_price(candidate.symbol, mid + (sell_step * i)), lots=lots)
-            for i in range(1, levels_each_side + 1)
-        ]
-    else:
-        sell_levels = [
-            GridLevel(index=i, side="sell", price=round_price(candidate.symbol, mid + (step * i)), lots=lots)
-            for i in range(1, levels_each_side + 1)
-        ]
+        if upper_bound is not None and upper_bound > mid:
+            sell_step = (upper_bound - mid) / levels_each_side
+            sell_levels = [
+                GridLevel(index=i, side="sell", price=round_price(candidate.symbol, mid + (sell_step * i)), lots=lots)
+                for i in range(1, levels_each_side + 1)
+            ]
+        else:
+            sell_levels = [
+                GridLevel(index=i, side="sell", price=round_price(candidate.symbol, mid + (step * i)), lots=lots)
+                for i in range(1, levels_each_side + 1)
+            ]
 
-    effective_spacing_pips = candidate.grid_spacing_pips
+    effective_spacing_pips = configured_spacing_pips
     deltas: list[float] = []
     if buy_levels:
         deltas.append(abs(mid - buy_levels[0].price) / pip)

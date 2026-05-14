@@ -422,6 +422,56 @@ def _update_virtual_position_on_fill(report: ExecutionReport, signal: Signal) ->
     VIRTUAL_POSITIONS.pop(symbol, None)
 
 
+def _signal_matches_position(signal: Signal, worker_id: str, position: WorkerPosition) -> bool:
+    if signal.action != SignalAction.OPEN:
+        return False
+    if signal.status != SignalStatus.EXECUTING:
+        return False
+    target_worker_id = signal.worker_id or signal.target_worker_id
+    if target_worker_id not in (None, worker_id):
+        return False
+    if _symbol_key(signal.symbol) != _symbol_key(position.symbol):
+        return False
+    if signal.side != position.side:
+        return False
+    if signal.grid_id and signal.grid_index is not None:
+        expected_comment = f"grid:{signal.grid_id}:{signal.grid_index}"
+        if position.comment.strip() != expected_comment:
+            return False
+    elif signal.limit_price is not None and position.entry_price is not None:
+        if abs(float(signal.limit_price) - float(position.entry_price)) > 1e-6:
+            return False
+    return True
+
+
+def _sync_executing_signals_from_positions_locked(hb: WorkerHeartbeat) -> None:
+    for position in hb.positions:
+        for signal in SIGNALS.values():
+            if not _signal_matches_position(signal, hb.worker_id, position):
+                continue
+            if any(
+                report.signal_id == signal.id
+                and report.worker_id == hb.worker_id
+                and report.status == SignalStatus.FILLED
+                and report.message == "position confirmed by heartbeat"
+                for report in EXECUTIONS
+            ):
+                break
+            report = ExecutionReport(
+                signal_id=signal.id,
+                worker_id=hb.worker_id,
+                status=SignalStatus.FILLED,
+                broker_order_id=str(position.ticket) if position.ticket is not None else None,
+                executed_price=position.entry_price,
+                lots=float(position.lots),
+                message="position confirmed by heartbeat",
+            )
+            EXECUTIONS.append(report)
+            signal.status = SignalStatus.FILLED
+            _update_virtual_position_on_fill(report, signal)
+            break
+
+
 def _grid_level_to_signal(plan: GridPlan, level, grid_id: str) -> Signal:
     side = SignalSide(level.side.lower())
     stop_loss = getattr(level, "stop_loss", None)
@@ -866,6 +916,7 @@ def execution_report(report: ExecutionReport, _: None = Depends(require_worker_t
 def heartbeat(hb: WorkerHeartbeat, _: None = Depends(require_worker_token)) -> dict:
     with STATE_LOCK:
         HEARTBEATS[hb.worker_id] = hb
+        _sync_executing_signals_from_positions_locked(hb)
         created = []
         if hb.mt5_connected and settings.mt5_worker.auto_close_enabled:
             created = _enqueue_auto_close_signals_locked(hb.worker_id, settings.mt5_worker.auto_close_profit_pct)
@@ -902,6 +953,7 @@ def heartbeat_ping(
             open_positions=max(open_positions, len(positions)),
             positions=positions,
         )
+        _sync_executing_signals_from_positions_locked(HEARTBEATS[worker_id])
         if mt5_connected and settings.mt5_worker.auto_close_enabled:
             _enqueue_auto_close_signals_locked(worker_id, settings.mt5_worker.auto_close_profit_pct)
     return "ok"

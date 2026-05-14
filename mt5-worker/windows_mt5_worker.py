@@ -459,7 +459,7 @@ def execute_signal(signal: dict[str, Any]) -> None:
     if request["action"] == mt5.TRADE_ACTION_PENDING:
         report(
             signal_id,
-            "filled",
+            "executing",
             "MT5 pending order placed",
             broker_order_id=str(result.order),
             executed_price=price,

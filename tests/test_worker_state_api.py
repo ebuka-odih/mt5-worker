@@ -133,6 +133,70 @@ def test_heartbeat_ping_accepts_positions_json_payload() -> None:
     assert positions[0]["side"] == "sell"
 
 
+def test_heartbeat_marks_pending_grid_signal_filled_when_position_comment_matches() -> None:
+    client = TestClient(server.app)
+    create_resp = client.post(
+        "/api/signals/create",
+        json={
+            "symbol": "BTCUSD",
+            "side": "buy",
+            "action": "open",
+            "lots": 0.01,
+            "target_worker_id": "windows-mt5-atlas-5k-01",
+        },
+    )
+    assert create_resp.status_code == 200
+    signal_id = create_resp.json()["id"]
+
+    with server.STATE_LOCK:
+        signal = server.SIGNALS[signal_id]
+        signal.order_type = "limit"
+        signal.status = server.SignalStatus.EXECUTING
+        signal.worker_id = "windows-mt5-atlas-5k-01"
+        signal.grid_id = "BTCUSD-grid-1"
+        signal.grid_index = 3
+        signal.limit_price = 99800.0
+
+    hb_resp = client.post(
+        "/api/worker/heartbeat",
+        params=_token_param(),
+        json={
+            "worker_id": "windows-mt5-atlas-5k-01",
+            "mt5_connected": True,
+            "account_login": 123456,
+            "broker": "AtlasFunded",
+            "balance": 5000.0,
+            "equity": 5005.0,
+            "open_positions": 1,
+            "positions": [
+                {
+                    "ticket": 777001,
+                    "symbol": "BTCUSD",
+                    "side": "buy",
+                    "lots": 0.01,
+                    "entry_price": 99800.0,
+                    "current_price": 99820.0,
+                    "profit": 2.5,
+                    "swap": 0.0,
+                    "commission": 0.0,
+                    "magic": 552501,
+                    "comment": "grid:BTCUSD-grid-1:3",
+                }
+            ],
+        },
+    )
+    assert hb_resp.status_code == 200
+
+    signals = client.get("/api/signals").json()
+    filled = next(row for row in signals if row["id"] == signal_id)
+    assert filled["status"] == "filled"
+
+    orders = client.get("/api/orders", params={**_token_param(), "worker_id": "windows-mt5-atlas-5k-01"}).json()
+    execution = next(row for row in orders if row["signal_id"] == signal_id)
+    assert execution["status"] == "filled"
+    assert execution["message"] == "position confirmed by heartbeat"
+
+
 def test_next_signal_plain_includes_action_and_position_ticket() -> None:
     client = TestClient(server.app)
     created = client.post(

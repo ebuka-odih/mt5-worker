@@ -98,7 +98,8 @@ def test_execute_signal_places_buy_limit_pending_order(monkeypatch):
     assert mt5.last_request["type_time"] == mt5.ORDER_TIME_GTC
     assert mt5.last_request["type_filling"] == mt5.ORDER_FILLING_RETURN
     assert "grid:eurusd-grid-123:4" in mt5.last_request["comment"]
-    assert reports and reports[0][0][1] == "filled"
+    assert reports and reports[0][0][1] == "executing"
+    assert reports[0][0][2] == "MT5 pending order placed"
 
 
 def test_execute_signal_places_sell_limit_pending_order(monkeypatch):
@@ -129,7 +130,8 @@ def test_execute_signal_places_sell_limit_pending_order(monkeypatch):
     assert mt5.last_request["price"] == 1.255
     assert mt5.last_request["type_filling"] == mt5.ORDER_FILLING_RETURN
     assert "grid:gbpusd-grid-9:1" in mt5.last_request["comment"]
-    assert reports and reports[0][0][1] == "filled"
+    assert reports and reports[0][0][1] == "executing"
+    assert reports[0][0][2] == "MT5 pending order placed"
 
 
 def test_serialize_positions_normalizes_future_shifted_mt5_times(monkeypatch, caplog):
