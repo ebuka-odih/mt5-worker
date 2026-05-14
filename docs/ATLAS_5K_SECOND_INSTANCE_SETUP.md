@@ -27,7 +27,7 @@ This profile runs **alongside** the existing MT5 brain without touching the old 
 
 ## Behavior choices
 - **Positive PnL auto-close remains enabled** via `auto_close_profit_pct: 0.6`
-- **Negative DD auto-close is enabled for funded-account protection** via `auto_close_loss_pct: 0.6`
+- **Negative DD auto-close is disabled** via `auto_close_loss_pct: 0.0` so losers are not force-closed before recovery.
 - Basket take profit is tightened to `$12`.
 
 ## Current de-risked 5k live profile

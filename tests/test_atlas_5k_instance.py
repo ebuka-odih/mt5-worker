@@ -36,7 +36,7 @@ def test_atlas_5k_settings_profile_loads_expected_rules() -> None:
     assert settings.mt5_worker.magic_number == 552701
     assert settings.mt5_worker.comment_prefix == "vps_forex_brain_atlas_5k"
     assert settings.mt5_worker.auto_close_profit_pct == 0.6
-    assert settings.mt5_worker.auto_close_loss_pct == 0.6
+    assert settings.mt5_worker.auto_close_loss_pct == 0.0
     assert settings.mt5_worker.basket_take_profit_usd == 12.0
 
 
