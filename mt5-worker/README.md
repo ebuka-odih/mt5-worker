@@ -15,6 +15,19 @@ Keep the old login's worker/service running separately. Do not overwrite the exi
 
 If the repo is checked out at `C:\forex-mt5-bot`, start the new worker from `C:\forex-mt5-bot\mt5-worker` so it uses the new Atlas 5k `.env` instead of the old worker folder.
 
+Windows update pattern for the new 5k login only:
+
+```cmd
+cd C:\forex-mt5-bot
+git pull
+cd mt5-worker
+copy .env.atlas-5k.example .env
+notepad .env
+venv\Scripts\python windows_mt5_worker.py
+```
+
+Use the same real worker token in the deployed VPS `config/settings.atlas-5k.yaml` and the Windows `.env`, and restart only the new Atlas 5k worker after editing `.env`.
+
 ### Prerequisites
 
 - Windows 10/11 with Python 3.9+

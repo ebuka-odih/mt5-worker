@@ -15,6 +15,7 @@ def test_atlas_5k_settings_profile_loads_expected_rules() -> None:
 
     assert settings.app.name == "forex-mt5-bot-atlas-5k"
     assert settings.api.port == 8782
+    assert settings.api.worker_token == "CHANGE_ME_ATLAS_5K_WORKER_TOKEN"
     assert settings.market_data.symbols == ["BTCUSD"]
     assert settings.risk.starting_balance == 5_000
     assert settings.risk.max_risk_per_trade_pct == 0.6

@@ -6,7 +6,7 @@ app:
 api:
   host: 127.0.0.1
   port: 8782
-  worker_token: ea12abb98fa630742d338ba2f58d602ef66bfb14bd942114df5c0da3b6f88ab2
+  worker_token: CHANGE_ME_ATLAS_5K_WORKER_TOKEN
 
 market_data:
   provider: bybit

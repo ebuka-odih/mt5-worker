@@ -14,7 +14,7 @@ This profile runs **alongside** the existing MT5 brain without touching the old 
 - Data dir: `./data-atlas-5k`
 - MT5 magic number: `552701`
 - MT5 comment prefix: `vps_forex_brain_atlas_5k`
-- Worker token: set the same value in `config/settings.atlas-5k.yaml` and the Windows worker `.env`
+- Worker token: keep the repo config on placeholder `CHANGE_ME_ATLAS_5K_WORKER_TOKEN`; put the real secret only in the deployed VPS config and the Windows worker `.env`
 
 ## Atlas Instant rule alignment used here
 - Starting balance: `$5,000`
@@ -66,7 +66,7 @@ notepad .env
 
 3. Set these values in `.env`:
    - `VPS_API_BASE=https://pushed-protection-sample-regulations.trycloudflare.com`
-   - `WORKER_TOKEN` = the same token you placed in `config/settings.atlas-5k.yaml`
+   - `WORKER_TOKEN` = the same real token you placed in the deployed VPS copy of `config/settings.atlas-5k.yaml`
    - `WORKER_ID=windows-mt5-atlas-5k-01`
    - `MT5_MAGIC=552701`
    - `DRY_RUN=false` only when you want live execution on the new 5k account
