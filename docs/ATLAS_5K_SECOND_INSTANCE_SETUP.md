@@ -65,7 +65,7 @@ notepad .env
 ```
 
 3. Set these values in `.env`:
-   - `VPS_API_BASE=https://pushed-protection-sample-regulations.trycloudflare.com`
+   - `VPS_API_BASE=https://<active-atlas-5k-tunnel-or-host>:8782` *(use the current live Atlas 5k endpoint; do not hardcode an expired quick-tunnel URL into git)*
    - `WORKER_TOKEN` = the same real token you placed in the deployed VPS copy of `config/settings.atlas-5k.yaml`
    - `WORKER_ID=windows-mt5-atlas-5k-01`
    - `MT5_MAGIC=552701`
@@ -73,7 +73,7 @@ notepad .env
 
    Example:
    ```env
-   VPS_API_BASE=https://pushed-protection-sample-regulations.trycloudflare.com
+   VPS_API_BASE=https://<active-atlas-5k-tunnel-or-host>
    WORKER_TOKEN=<same-token-as-config/settings.atlas-5k.yaml>
    WORKER_ID=windows-mt5-atlas-5k-01
    DRY_RUN=false
@@ -97,6 +97,20 @@ venv\Scripts\python windows_mt5_worker.py
 - Worker log should show `MT5 connected`
 - Orders for this account should carry magic `552701`
 - Existing instance continues using port `8780` / magic `552501`
+
+## Monitoring endpoints to keep for live tuning
+
+Use the Atlas 5k base URL plus the same worker token from the VPS config.
+
+- `GET /health` — quick liveness and connected worker count
+- `GET /api/signals` — raw signal queue/history
+- `GET /api/orders?worker_token=<TOKEN>&worker_id=windows-mt5-atlas-5k-01` — execution reports for the 5k worker
+- `GET /api/workers?worker_token=<TOKEN>` — latest worker heartbeats
+- `GET /api/workers/windows-mt5-atlas-5k-01/positions?worker_token=<TOKEN>` — live positions seen from MT5
+- `GET /api/workers/windows-mt5-atlas-5k-01/diagnostics?worker_token=<TOKEN>` — per-position PnL/age diagnostics
+- `GET /api/diagnostics/summary?worker_token=<TOKEN>` — aggregate rejection, close-reason, cooldown, and basket stats to spot where the live bot diverges from config
+
+These endpoints are the fastest way to verify whether the bot is actually behaving like the 5k profile and to see what needs improving next.
 
 ## Deployment note
 - Do **not** stop or reconfigure the original Atlas worker that is already tied to the old login.

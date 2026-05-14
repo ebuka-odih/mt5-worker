@@ -8,8 +8,8 @@ A lightweight Windows worker that connects MetaTrader 5 to the VPS forex brain. 
 
 For the **new Atlas 5k login account**, use the dedicated template `mt5-worker/.env.atlas-5k.example` and point it at the Atlas 5k VPS profile on port `8782`.
 
-Current verified Atlas 5k tunnel in the example file:
-- `https://pushed-protection-sample-regulations.trycloudflare.com`
+The Atlas 5k example file intentionally uses a placeholder for `VPS_API_BASE`.
+Paste the current live Atlas 5k tunnel or direct host/port before starting the new worker.
 
 Keep the old login's worker/service running separately. Do not overwrite the existing live `.env` used by the old account.
 
@@ -27,6 +27,15 @@ venv\Scripts\python windows_mt5_worker.py
 ```
 
 Use the same real worker token in the deployed VPS `config/settings.atlas-5k.yaml` and the Windows `.env`, and restart only the new Atlas 5k worker after editing `.env`.
+
+Helpful monitoring endpoints for this second login:
+- `/health`
+- `/api/signals`
+- `/api/orders?worker_token=<TOKEN>&worker_id=windows-mt5-atlas-5k-01`
+- `/api/workers?worker_token=<TOKEN>`
+- `/api/workers/windows-mt5-atlas-5k-01/positions?worker_token=<TOKEN>`
+- `/api/workers/windows-mt5-atlas-5k-01/diagnostics?worker_token=<TOKEN>`
+- `/api/diagnostics/summary?worker_token=<TOKEN>`
 
 ### Prerequisites
 

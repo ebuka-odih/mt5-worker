@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+import math
 
 import pandas as pd
 
@@ -38,6 +39,9 @@ class GridSimulationConfig:
     contract_size_per_lot: float = 1.0
     leverage: float = 10.0
     max_margin_usage_pct: float = 100.0
+    min_lot_size: float = 0.0
+    lot_step: float = 0.0
+    fixed_lot_size: float | None = None
 
 
 @dataclass
@@ -122,6 +126,28 @@ def _pip_value_per_lot(cfg: GridSimulationConfig) -> float:
 def _lot_size_for_risk(entry: float, sl: float, risk: float, cfg: GridSimulationConfig) -> float:
     stop_pips = abs(entry - sl) / max(cfg.pip_size, 1e-9)
     return risk / max(stop_pips * _pip_value_per_lot(cfg), 1e-9)
+
+
+def _risk_for_lot(entry: float, sl: float, lot_size: float, cfg: GridSimulationConfig) -> float:
+    stop_pips = abs(entry - sl) / max(cfg.pip_size, 1e-9)
+    return stop_pips * _pip_value_per_lot(cfg) * max(lot_size, 0.0)
+
+
+def _quantize_lot_size(raw_lot_size: float, cfg: GridSimulationConfig) -> float:
+    lot_size = max(raw_lot_size, 0.0)
+    min_lot_size = max(cfg.min_lot_size, 0.0)
+    lot_step = max(cfg.lot_step, 0.0)
+
+    if cfg.fixed_lot_size is not None:
+        lot_size = max(cfg.fixed_lot_size, 0.0)
+
+    if lot_step > 0:
+        lot_size = math.floor((lot_size / lot_step) + 1e-9) * lot_step
+
+    if lot_size > 0 and lot_size < min_lot_size:
+        lot_size = min_lot_size
+
+    return round(lot_size, 8)
 
 
 def _spread_cost(position: SimPosition, cfg: GridSimulationConfig) -> float:
@@ -375,7 +401,9 @@ def _position_from_order(symbol: str, order: _GridOrder, cfg: GridSimulationConf
     else:
         tp = order.price - cfg.take_profit_spacing
         sl = order.price + cfg.stop_loss_spacing
-    lot_size = _lot_size_for_risk(order.price, sl, risk, cfg)
+    requested_lot_size = _lot_size_for_risk(order.price, sl, risk, cfg)
+    lot_size = _quantize_lot_size(requested_lot_size, cfg)
+    actual_risk = _risk_for_lot(order.price, sl, lot_size, cfg)
     pip_value_per_lot = _pip_value_per_lot(cfg)
     return SimPosition(
         symbol=symbol,
@@ -383,7 +411,7 @@ def _position_from_order(symbol: str, order: _GridOrder, cfg: GridSimulationConf
         entry=order.price,
         tp=tp,
         sl=sl,
-        risk=risk,
+        risk=actual_risk,
         opened_at=opened_at,
         lot_size=lot_size,
         pip_value_per_lot=pip_value_per_lot,

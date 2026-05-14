@@ -50,3 +50,12 @@ def test_atlas_5k_compose_file_targets_dedicated_runtime() -> None:
     assert brain["ports"] == ["8782:8782"]
     assert "./config/settings.atlas-5k.yaml:/app/config/settings.yaml:ro" in brain["volumes"]
     assert "./data-atlas-5k:/app/data" in brain["volumes"]
+
+
+def test_atlas_5k_windows_env_example_stays_safe_and_profile_specific() -> None:
+    env_example = (PROJECT_ROOT / "mt5-worker/.env.atlas-5k.example").read_text()
+
+    assert "https://CHANGE_ME_ATLAS_5K_TUNNEL_OR_HOST" in env_example
+    assert "windows-mt5-atlas-5k-01" in env_example
+    assert "MT5_MAGIC=552701" in env_example
+    assert "WORKER_TOKEN=<paste-token-from-vps-config>" in env_example

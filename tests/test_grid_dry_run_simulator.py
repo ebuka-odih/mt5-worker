@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pandas as pd
 
-from brain.simulation.grid_dry_run import GridSimulationConfig, run_grid_simulation
+from brain.simulation.grid_dry_run import (
+    GridSimulationConfig,
+    _GridOrder,
+    _position_from_order,
+    run_grid_simulation,
+)
 
 
 def candles(values: list[float]) -> pd.DataFrame:
@@ -74,3 +79,38 @@ def test_simulator_pauses_after_daily_loss_budget_is_hit() -> None:
 
     assert result.pause_events >= 1
     assert result.new_orders_blocked >= 1
+
+
+
+def test_position_uses_fixed_lot_size_when_broker_minimum_makes_risk_target_impossible() -> None:
+    cfg = GridSimulationConfig(
+        stop_loss_spacing=600,
+        pip_size=1.0,
+        contract_size_per_lot=1.0,
+        risk_per_order=7.5,
+        fixed_lot_size=0.01,
+        min_lot_size=0.01,
+        lot_step=0.01,
+    )
+
+    position = _position_from_order("BTCUSD", _GridOrder("buy", 100_000), cfg, cfg.risk_per_order, "t0")
+
+    assert position.lot_size == 0.01
+    assert position.risk == 6.0
+
+
+
+def test_position_rounds_risk_sized_lot_down_to_broker_step() -> None:
+    cfg = GridSimulationConfig(
+        stop_loss_spacing=600,
+        pip_size=1.0,
+        contract_size_per_lot=1.0,
+        risk_per_order=7.5,
+        min_lot_size=0.01,
+        lot_step=0.01,
+    )
+
+    position = _position_from_order("BTCUSD", _GridOrder("buy", 100_000), cfg, cfg.risk_per_order, "t0")
+
+    assert position.lot_size == 0.01
+    assert position.risk == 6.0
