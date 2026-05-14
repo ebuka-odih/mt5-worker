@@ -244,7 +244,7 @@ def test_auto_close_and_order_details_endpoints() -> None:
     assert orders[0]["position_ticket"] == 11223344
 
 
-def test_heartbeat_auto_close_uses_basket_stale_and_cooldown_guards(monkeypatch) -> None:
+def test_heartbeat_auto_close_reopens_immediate_replacement_even_with_cooldown(monkeypatch) -> None:
     monkeypatch.setattr(server.settings.mt5_worker, "basket_take_profit_usd", 30.0)
     monkeypatch.setattr(server.settings.mt5_worker, "stale_position_minutes", 60)
     monkeypatch.setattr(server.settings.mt5_worker, "auto_close_profit_pct", 50.0)
@@ -315,7 +315,9 @@ def test_heartbeat_auto_close_uses_basket_stale_and_cooldown_guards(monkeypatch)
         for row in client.get("/api/signals").json()
         if row["action"] == "open" and row["reason"] == f"auto-reopen-after-close:{close_signal['id']}"
     ]
-    assert reopened == []
+    assert len(reopened) == 1
+    assert reopened[0]["target_worker_id"] == "windows-mt5-atlas-01"
+    assert reopened[0]["symbol"] == close_signal["symbol"]
 
 
 def test_heartbeat_auto_close_never_stale_closes_losing_positions(monkeypatch, caplog) -> None:

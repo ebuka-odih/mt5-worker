@@ -112,7 +112,11 @@ def _basket_net_profit(worker: WorkerHeartbeat) -> float:
     return round(sum(position.net_profit for position in worker.positions), 2)
 
 
-def _should_enqueue_signal_locked(signal: Signal, extra_positions: Optional[list[PositionExposure]] = None) -> bool:
+def _should_enqueue_signal_locked(
+    signal: Signal,
+    extra_positions: Optional[list[PositionExposure]] = None,
+    bypass_cooldown: bool = False,
+) -> bool:
     if signal.action == SignalAction.CLOSE:
         return True
 
@@ -122,7 +126,7 @@ def _should_enqueue_signal_locked(signal: Signal, extra_positions: Optional[list
     if not is_grid_signal and _has_pending_signal_locked(symbol):
         _bump_counter_locked(ENTRY_BLOCK_COUNTS, "pending-signal")
         return False
-    if _cooldown_remaining_seconds_locked(symbol) > 0:
+    if not bypass_cooldown and _cooldown_remaining_seconds_locked(symbol) > 0:
         _bump_counter_locked(ENTRY_BLOCK_COUNTS, "reentry-cooldown")
         logger.info("entry blocked for %s by cooldown", symbol)
         return False
@@ -346,7 +350,7 @@ def _enqueue_reopen_after_close_locked(signal: Signal, report: ExecutionReport) 
         target_worker_id=signal.target_worker_id or report.worker_id,
     )
 
-    if not _should_enqueue_signal_locked(reopen_signal):
+    if not _should_enqueue_signal_locked(reopen_signal, bypass_cooldown=True):
         return None
     SIGNALS[reopen_signal.id] = reopen_signal
     return reopen_signal
