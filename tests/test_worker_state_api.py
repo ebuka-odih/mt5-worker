@@ -24,6 +24,7 @@ def _reset_server_state():
         server.ENTRY_BLOCK_COUNTS.clear()
         server.GRID_REJECTION_COUNTS.clear()
         server.CLOSE_REASON_COUNTS.clear()
+        server.GRID_RECYCLE_COUNTS.clear()
     yield
     with server.STATE_LOCK:
         server.HEARTBEATS.clear()
@@ -34,6 +35,7 @@ def _reset_server_state():
         server.ENTRY_BLOCK_COUNTS.clear()
         server.GRID_REJECTION_COUNTS.clear()
         server.CLOSE_REASON_COUNTS.clear()
+        server.GRID_RECYCLE_COUNTS.clear()
 
 
 def test_worker_state_endpoints_expose_position_details() -> None:
@@ -383,6 +385,10 @@ def test_heartbeat_auto_close_reopens_immediate_replacement_even_with_cooldown(m
     assert reopened[0]["target_worker_id"] == "windows-mt5-atlas-01"
     assert reopened[0]["symbol"] == close_signal["symbol"]
 
+    diagnostics = client.get("/api/diagnostics/summary", params=_token_param())
+    assert diagnostics.status_code == 200
+    assert diagnostics.json()["grid_recycle_counts"]["auto-reopen-after-close"] == 1
+
 
 def test_heartbeat_auto_close_never_stale_closes_losing_positions(monkeypatch, caplog) -> None:
     monkeypatch.setattr(server.settings.mt5_worker, "basket_take_profit_usd", 0.0)
@@ -432,6 +438,7 @@ def test_diagnostics_summary_exposes_counters_and_cooldowns() -> None:
         server.ENTRY_BLOCK_COUNTS.update({"reentry-cooldown": 2})
         server.GRID_REJECTION_COUNTS.update({"outside configured session window": 3})
         server.CLOSE_REASON_COUNTS.update({"basket-tp-hit": 1})
+        server.GRID_RECYCLE_COUNTS.update({"auto-reopen-after-close": 4})
         server.LAST_CLOSE_TIMES["BTCUSD"] = server.datetime.now(server.timezone.utc)
         server.HEARTBEATS["windows-mt5-atlas-01"] = server.WorkerHeartbeat(
             worker_id="windows-mt5-atlas-01",
@@ -457,5 +464,6 @@ def test_diagnostics_summary_exposes_counters_and_cooldowns() -> None:
     assert body["entry_block_counts"]["reentry-cooldown"] == 2
     assert body["grid_rejection_counts"]["outside configured session window"] == 3
     assert body["close_reason_counts"]["basket-tp-hit"] == 1
+    assert body["grid_recycle_counts"]["auto-reopen-after-close"] == 4
     assert body["workers"][0]["basket_net_pnl"] == 14.8
     assert "BTCUSD" in body["cooldowns"]

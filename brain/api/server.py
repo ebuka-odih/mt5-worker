@@ -53,6 +53,7 @@ LAST_CLOSE_TIMES: Dict[str, datetime] = {}
 ENTRY_BLOCK_COUNTS: Counter[str] = Counter()
 GRID_REJECTION_COUNTS: Counter[str] = Counter()
 CLOSE_REASON_COUNTS: Counter[str] = Counter()
+GRID_RECYCLE_COUNTS: Counter[str] = Counter()
 SCAN_STOP_EVENT = threading.Event()
 SCAN_THREAD: Optional[threading.Thread] = None
 
@@ -353,6 +354,7 @@ def _enqueue_reopen_after_close_locked(signal: Signal, report: ExecutionReport) 
     if not _should_enqueue_signal_locked(reopen_signal, bypass_cooldown=True):
         return None
     SIGNALS[reopen_signal.id] = reopen_signal
+    _bump_counter_locked(GRID_RECYCLE_COUNTS, "auto-reopen-after-close")
     return reopen_signal
 
 
@@ -791,6 +793,7 @@ def diagnostics_summary(_: None = Depends(require_worker_token)) -> dict[str, An
             "entry_block_counts": dict(ENTRY_BLOCK_COUNTS),
             "grid_rejection_counts": dict(GRID_REJECTION_COUNTS),
             "close_reason_counts": dict(CLOSE_REASON_COUNTS),
+            "grid_recycle_counts": dict(GRID_RECYCLE_COUNTS),
             "cooldowns": cooldowns,
             "workers": workers,
         }

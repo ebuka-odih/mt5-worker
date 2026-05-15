@@ -34,6 +34,7 @@ def _reset_runtime_state() -> None:
         server.ENTRY_BLOCK_COUNTS.clear()
         server.GRID_REJECTION_COUNTS.clear()
         server.CLOSE_REASON_COUNTS.clear()
+        server.GRID_RECYCLE_COUNTS.clear()
 
 
 @pytest.fixture(autouse=True)
