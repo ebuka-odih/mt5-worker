@@ -37,6 +37,11 @@ Helpful monitoring endpoints for this second login:
 - `/api/workers/windows-mt5-atlas-5k-01/diagnostics?worker_token=<TOKEN>`
 - `/api/diagnostics/summary?worker_token=<TOKEN>`
 
+Runtime note from pushed change `cc4d27d`:
+- the Atlas 5k brain now exposes `grid_recycle_counts` in `/api/diagnostics/summary`
+- successful close-triggered replacements increment `grid_recycle_counts["auto-reopen-after-close"]`
+- local AI / operators should use that counter to verify that profitable closes are actually recycling back into a fresh grid slot on the new 5k login runtime
+
 ### Prerequisites
 
 - Windows 10/11 with Python 3.9+

@@ -117,3 +117,31 @@ These endpoints are the fastest way to verify whether the bot is actually behavi
 - The new 5k login should use only the `atlas-5k` profile files, port `8782`, magic `552701`, and worker ID `windows-mt5-atlas-5k-01`.
 - If the Windows box runs the worker as NSSM or Task Scheduler, restart only the new Atlas 5k worker after updating `.env`.
 - Use the dedicated compose project name `atlas-5k` so compose does not try to replace the original `forex-brain` stack.
+
+## Latest pushed runtime note for local AI
+
+Committed in `cc4d27d` (`feat: add atlas 5k recycle runtime metrics`).
+
+What changed in code:
+- `brain/api/server.py` now increments `grid_recycle_counts["auto-reopen-after-close"]` when a filled close successfully spawns its immediate replacement open signal.
+- `/api/diagnostics/summary?worker_token=<TOKEN>` now returns `grid_recycle_counts` alongside `entry_block_counts`, `grid_rejection_counts`, and `close_reason_counts`.
+- Regression coverage lives in:
+  - `tests/test_worker_state_api.py`
+  - `tests/test_signal_cycle_loop.py`
+
+How the local AI should use this:
+- Treat `grid_recycle_counts` as the runtime proof that close-triggered grid slot replacement is actually happening on the isolated 5k brain.
+- When tuning the 5k profile for higher trade cadence, compare:
+  - `GET /api/signals`
+  - `GET /api/orders?worker_token=<TOKEN>&worker_id=windows-mt5-atlas-5k-01`
+  - `GET /api/diagnostics/summary?worker_token=<TOKEN>`
+- If positive closes occur but `grid_recycle_counts.auto-reopen-after-close` does not rise, inspect the close->reopen path in `brain/api/server.py` before changing strategy parameters.
+- Keep this behavior isolated to the new 5k runtime; do not move the new login onto the old profile or overwrite the old worker `.env`.
+
+Validation used for this pushed change:
+```bash
+venv/bin/python -m pytest tests/test_atlas_5k_instance.py tests/test_grid_strike.py tests/test_btc_funded_challenge.py tests/test_worker_state_api.py tests/test_signal_cycle_loop.py -q
+```
+Expected monitoring reality after deployment:
+- `http://127.0.0.1:8782/health` should be healthy for the Atlas 5k runtime.
+- The old runtime must be checked separately on its own port/profile; do not assume it is still running just because the files are separate.
