@@ -213,6 +213,35 @@ def _serialize_positions(positions: list[Any]) -> list[dict[str, Any]]:
     return serialized
 
 
+def _pending_order_side(order_type: Any) -> str:
+    if mt5 is None:
+        return "buy"
+    if order_type in {getattr(mt5, "ORDER_TYPE_BUY", object()), getattr(mt5, "ORDER_TYPE_BUY_LIMIT", object())}:
+        return "buy"
+    if order_type in {getattr(mt5, "ORDER_TYPE_SELL", object()), getattr(mt5, "ORDER_TYPE_SELL_LIMIT", object())}:
+        return "sell"
+    return "buy"
+
+
+def _serialize_pending_orders(orders: list[Any]) -> list[dict[str, Any]]:
+    serialized: list[dict[str, Any]] = []
+    for order in orders:
+        serialized.append(
+            {
+                "ticket": getattr(order, "ticket", None),
+                "symbol": getattr(order, "symbol", ""),
+                "side": _pending_order_side(getattr(order, "type", None)),
+                "lots": float(getattr(order, "volume_current", getattr(order, "volume_initial", 0.0))),
+                "price": float(getattr(order, "price_open", 0.0)),
+                "stop_loss": float(getattr(order, "sl", 0.0)) or None,
+                "take_profit": float(getattr(order, "tp", 0.0)) or None,
+                "magic": getattr(order, "magic", None),
+                "comment": str(getattr(order, "comment", "") or ""),
+            }
+        )
+    return serialized
+
+
 def send_heartbeat() -> None:
     """Send heartbeat to VPS with current worker status."""
     global _mt5_state
@@ -220,7 +249,9 @@ def send_heartbeat() -> None:
     if _mt5_state.ensure_initialized():
         account = mt5.account_info()
         positions = mt5.positions_get() or []
+        pending_orders = mt5.orders_get() or []
         positions_payload = _serialize_positions(list(positions))
+        pending_orders_payload = _serialize_pending_orders(list(pending_orders))
         payload = {
             "worker_id": WORKER_ID,
             "mt5_connected": True,
@@ -230,6 +261,7 @@ def send_heartbeat() -> None:
             "equity": getattr(account, "equity", None),
             "open_positions": len(positions),
             "positions": positions_payload,
+            "pending_orders": pending_orders_payload,
             "dry_run": DRY_RUN,
         }
     else:
@@ -238,6 +270,7 @@ def send_heartbeat() -> None:
             "mt5_connected": False,
             "open_positions": 0,
             "positions": [],
+            "pending_orders": [],
             "dry_run": DRY_RUN,
         }
 
@@ -375,6 +408,25 @@ def execute_signal(signal: dict[str, Any]) -> None:
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
+    elif action == "cancel":
+        order_ticket = signal.get("order_ticket")
+        if order_ticket is None:
+            report(signal_id, "rejected", "cancel signal missing order_ticket")
+            return
+        orders = mt5.orders_get(ticket=int(order_ticket)) or []
+        if not orders:
+            report(signal_id, "rejected", f"Pending order {order_ticket} not found")
+            return
+        order = orders[0]
+        symbol = getattr(order, "symbol", symbol)
+        request = {
+            "action": mt5.TRADE_ACTION_REMOVE,
+            "order": int(order_ticket),
+            "symbol": symbol,
+            "magic": MAGIC,
+            "comment": "vps_forex_cancel",
+        }
+        price = float(getattr(order, "price_open", 0.0) or 0.0)
     else:
         if not mt5.symbol_select(symbol, True):
             error = mt5.last_error()
@@ -451,6 +503,16 @@ def execute_signal(signal: dict[str, Any]) -> None:
             "filled",
             "MT5 position closed",
             broker_order_id=str(result.order),
+            executed_price=price,
+            lots=float(request.get("volume", lots)),
+        )
+        return
+    if action == "cancel":
+        report(
+            signal_id,
+            "cancelled",
+            "MT5 pending order cancelled",
+            broker_order_id=str(signal.get("order_ticket") or result.order),
             executed_price=price,
             lots=float(request.get("volume", lots)),
         )

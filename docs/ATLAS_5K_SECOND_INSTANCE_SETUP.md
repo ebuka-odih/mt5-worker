@@ -107,6 +107,8 @@ Use the Atlas 5k base URL plus the same worker token from the VPS config.
 - `GET /api/orders?worker_token=<TOKEN>&worker_id=windows-mt5-atlas-5k-01` — execution reports for the 5k worker
 - `GET /api/workers?worker_token=<TOKEN>` — latest worker heartbeats
 - `GET /api/workers/windows-mt5-atlas-5k-01/positions?worker_token=<TOKEN>` — live positions seen from MT5
+- `GET /api/workers/windows-mt5-atlas-5k-01/pending-orders?worker_token=<TOKEN>` — pending MT5 ladder orders currently resting on the new 5k login
+- `POST /api/workers/windows-mt5-atlas-5k-01/pending-orders/<ORDER_TICKET>/cancel?worker_token=<TOKEN>` — cancel a selected pending MT5 order without touching open positions
 - `GET /api/workers/windows-mt5-atlas-5k-01/diagnostics?worker_token=<TOKEN>` — per-position PnL/age diagnostics
 - `GET /api/diagnostics/summary?worker_token=<TOKEN>` — aggregate rejection, close-reason, cooldown, and basket stats to spot where the live bot diverges from config
 

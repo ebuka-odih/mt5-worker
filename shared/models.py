@@ -25,6 +25,7 @@ class SignalStatus(str, Enum):
 class SignalAction(str, Enum):
     OPEN = "open"
     CLOSE = "close"
+    CANCEL = "cancel"
 
 
 class ForexQuote(BaseModel):
@@ -44,6 +45,7 @@ class Signal(BaseModel):
     action: SignalAction = SignalAction.OPEN
     lots: float
     position_ticket: Optional[int] = None
+    order_ticket: Optional[int] = None
     limit_price: Optional[float] = None
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
@@ -89,6 +91,18 @@ class WorkerPosition(BaseModel):
         return float(self.profit or 0.0) + float(self.swap or 0.0) + float(self.commission or 0.0)
 
 
+class WorkerPendingOrder(BaseModel):
+    ticket: Optional[int] = None
+    symbol: str
+    side: SignalSide
+    lots: float
+    price: Optional[float] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    magic: Optional[int] = None
+    comment: str = ""
+
+
 class WorkerHeartbeat(BaseModel):
     worker_id: str
     mt5_connected: bool
@@ -98,4 +112,5 @@ class WorkerHeartbeat(BaseModel):
     equity: Optional[float] = None
     open_positions: int = 0
     positions: list[WorkerPosition] = Field(default_factory=list)
+    pending_orders: list[WorkerPendingOrder] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

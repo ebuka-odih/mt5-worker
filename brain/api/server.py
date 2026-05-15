@@ -17,7 +17,17 @@ from brain.data.forex_data import YFinanceForexProvider
 from brain.risk.funded_challenge import AccountRiskSnapshot, PositionExposure, evaluate_entry_guard
 from brain.signals.grid_strike import GridPlan, GridStrikeCandidate, build_grid_plan, score_grid_candidate
 from brain.signals.simple_strategy import simple_signal
-from shared.models import ExecutionReport, ForexQuote, Signal, SignalAction, SignalSide, SignalStatus, WorkerHeartbeat, WorkerPosition
+from shared.models import (
+    ExecutionReport,
+    ForexQuote,
+    Signal,
+    SignalAction,
+    SignalSide,
+    SignalStatus,
+    WorkerHeartbeat,
+    WorkerPendingOrder,
+    WorkerPosition,
+)
 from shared.settings import load_settings
 
 settings = load_settings()
@@ -64,6 +74,7 @@ class CreateSignalRequest(BaseModel):
     action: str = "open"
     lots: Optional[float] = None
     position_ticket: Optional[int] = None
+    order_ticket: Optional[int] = None
     limit_price: Optional[float] = None
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
@@ -383,6 +394,31 @@ def _parse_positions_json(raw_payload: Optional[str]) -> list[WorkerPosition]:
     return positions
 
 
+def _parse_pending_orders_json(raw_payload: Optional[str]) -> list[WorkerPendingOrder]:
+    if not raw_payload:
+        return []
+    try:
+        payload = json.loads(raw_payload)
+    except Exception as exc:
+        logger.warning("heartbeat-ping pending_orders_json parse failed: %s", exc)
+        return []
+
+    if not isinstance(payload, list):
+        logger.warning("heartbeat-ping pending_orders_json is not a list")
+        return []
+
+    pending_orders: list[WorkerPendingOrder] = []
+    for idx, row in enumerate(payload):
+        if not isinstance(row, dict):
+            logger.warning("heartbeat-ping pending_orders_json row[%d] ignored (not object)", idx)
+            continue
+        try:
+            pending_orders.append(WorkerPendingOrder.model_validate(row))
+        except Exception as exc:
+            logger.warning("heartbeat-ping pending_orders_json row[%d] validation failed: %s", idx, exc)
+    return pending_orders
+
+
 def _update_virtual_position_on_fill(report: ExecutionReport, signal: Signal) -> None:
     if report.status != SignalStatus.FILLED:
         return
@@ -446,7 +482,58 @@ def _signal_matches_position(signal: Signal, worker_id: str, position: WorkerPos
     return True
 
 
+def _signal_matches_pending_order(signal: Signal, worker_id: str, pending_order: WorkerPendingOrder) -> bool:
+    if signal.action != SignalAction.OPEN:
+        return False
+    if signal.status not in {SignalStatus.CLAIMED, SignalStatus.EXECUTING}:
+        return False
+    if str(signal.order_type or "market").lower() != "limit":
+        return False
+    target_worker_id = signal.worker_id or signal.target_worker_id
+    if target_worker_id not in (None, worker_id):
+        return False
+    if _symbol_key(signal.symbol) != _symbol_key(pending_order.symbol):
+        return False
+    if signal.side != pending_order.side:
+        return False
+    if signal.grid_id and signal.grid_index is not None:
+        expected_comment = f"grid:{signal.grid_id}:{signal.grid_index}"
+        if pending_order.comment.strip() != expected_comment:
+            return False
+    elif signal.limit_price is not None and pending_order.price is not None:
+        if abs(float(signal.limit_price) - float(pending_order.price)) > 1e-6:
+            return False
+    return True
+
+
 def _sync_executing_signals_from_positions_locked(hb: WorkerHeartbeat) -> None:
+    for pending_order in hb.pending_orders:
+        for signal in SIGNALS.values():
+            if not _signal_matches_pending_order(signal, hb.worker_id, pending_order):
+                continue
+            if any(
+                report.signal_id == signal.id
+                and report.worker_id == hb.worker_id
+                and report.status == SignalStatus.EXECUTING
+                and report.message == "pending order confirmed by heartbeat"
+                for report in EXECUTIONS
+            ):
+                break
+            report = ExecutionReport(
+                signal_id=signal.id,
+                worker_id=hb.worker_id,
+                status=SignalStatus.EXECUTING,
+                broker_order_id=str(pending_order.ticket) if pending_order.ticket is not None else None,
+                executed_price=pending_order.price,
+                lots=float(pending_order.lots),
+                message="pending order confirmed by heartbeat",
+            )
+            EXECUTIONS.append(report)
+            signal.status = SignalStatus.EXECUTING
+            if pending_order.ticket is not None:
+                signal.order_ticket = int(pending_order.ticket)
+            break
+
     for position in hb.positions:
         for signal in SIGNALS.values():
             if not _signal_matches_position(signal, hb.worker_id, position):
@@ -701,6 +788,7 @@ def create_signal_from_grid(req: CreateSignalRequest = Body(...)) -> Signal:
         action=SignalAction(req.action.lower()),
         lots=lots,
         position_ticket=req.position_ticket,
+        order_ticket=req.order_ticket,
         limit_price=req.limit_price,
         stop_loss=req.stop_loss,
         take_profit=req.take_profit,
@@ -841,6 +929,38 @@ def get_worker_positions(worker_id: str, _: None = Depends(require_worker_token)
     return worker.positions
 
 
+@app.get("/api/workers/{worker_id}/pending-orders", response_model=list[WorkerPendingOrder])
+def get_worker_pending_orders(worker_id: str, _: None = Depends(require_worker_token)) -> list[WorkerPendingOrder]:
+    with STATE_LOCK:
+        worker = HEARTBEATS.get(worker_id)
+    if worker is None:
+        raise HTTPException(status_code=404, detail="worker not found")
+    return worker.pending_orders
+
+
+@app.post("/api/workers/{worker_id}/pending-orders/{order_ticket}/cancel")
+def cancel_worker_pending_order(worker_id: str, order_ticket: int, _: None = Depends(require_worker_token)) -> dict[str, Any]:
+    with STATE_LOCK:
+        worker = HEARTBEATS.get(worker_id)
+        if worker is None:
+            raise HTTPException(status_code=404, detail="worker not found")
+        matching_order = next((order for order in worker.pending_orders if order.ticket == order_ticket), None)
+        if matching_order is None:
+            raise HTTPException(status_code=404, detail="pending order not found")
+        signal = Signal(
+            symbol=_symbol_key(matching_order.symbol),
+            side=matching_order.side,
+            action=SignalAction.CANCEL,
+            lots=float(matching_order.lots),
+            order_ticket=int(order_ticket),
+            confidence=1.0,
+            reason="manual-pending-order-cancel",
+            target_worker_id=worker_id,
+        )
+        SIGNALS[signal.id] = signal
+    return {"ok": True, "worker_id": worker_id, "order_ticket": order_ticket, "signal_id": signal.id}
+
+
 @app.post("/api/workers/{worker_id}/auto-close")
 def execute_auto_close(
     worker_id: str,
@@ -888,6 +1008,7 @@ def next_signal_plain(worker_id: str, _: None = Depends(require_worker_token)) -
     stop_loss = "" if signal.stop_loss is None else str(signal.stop_loss)
     take_profit = "" if signal.take_profit is None else str(signal.take_profit)
     position_ticket = "" if signal.position_ticket is None else str(signal.position_ticket)
+    order_ticket = "" if signal.order_ticket is None else str(signal.order_ticket)
     return "|".join(
         [
             signal.id,
@@ -898,6 +1019,7 @@ def next_signal_plain(worker_id: str, _: None = Depends(require_worker_token)) -
             take_profit,
             signal.action.value,
             position_ticket,
+            order_ticket,
         ]
     )
 
@@ -942,9 +1064,11 @@ def heartbeat_ping(
     equity: Optional[float] = None,
     open_positions: int = 0,
     positions_json: Optional[str] = None,
+    pending_orders_json: Optional[str] = None,
     _: None = Depends(require_worker_token),
 ) -> str:
     positions = _parse_positions_json(positions_json)
+    pending_orders = _parse_pending_orders_json(pending_orders_json)
     with STATE_LOCK:
         HEARTBEATS[worker_id] = WorkerHeartbeat(
             worker_id=worker_id,
@@ -955,6 +1079,7 @@ def heartbeat_ping(
             equity=equity,
             open_positions=max(open_positions, len(positions)),
             positions=positions,
+            pending_orders=pending_orders,
         )
         _sync_executing_signals_from_positions_locked(HEARTBEATS[worker_id])
         if mt5_connected and settings.mt5_worker.auto_close_enabled:
