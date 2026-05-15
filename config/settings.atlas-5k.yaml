@@ -26,11 +26,11 @@ risk:
   challenge_min_days: 5
   challenge_max_days: 999
   max_open_positions: 30
-  max_positions_per_symbol: 15
-  max_same_side_positions: 8
-  max_directional_skew: 8
-  default_stop_loss_pips: 600
-  default_take_profit_pips: 1200
+  max_positions_per_symbol: 30
+  max_same_side_positions: 15
+  max_directional_skew: 15
+  default_stop_loss_pips: 40
+  default_take_profit_pips: 80
   min_rr: 2.0
   risk_per_order: 7.5
   daily_loss_budget: 75.0
@@ -56,12 +56,12 @@ grid_strike:
   max_range_pct: 20.00
   max_trend_ratio: 0.70
   lookback_candles: 720
-  levels_each_side: 5
-  min_spacing_pips: 500.0
-  max_spacing_pips: 900.0
-  grid_spacing: 600.0
-  take_profit_spacing: 1200.0
-  stop_loss_spacing: 600.0
+  levels_each_side: 50
+  min_spacing_pips: 20.0
+  max_spacing_pips: 40.0
+  grid_spacing: 20.0
+  take_profit_spacing: 40.0
+  stop_loss_spacing: 20.0
   atr_period: 14
   atr_spacing_multiplier: 1.25
   session_start_hour_utc: 6
@@ -72,9 +72,9 @@ grid_strike:
     BTCUSD: 0.01
   symbol_grid_overrides:
     BTCUSD:
-      levels_each_side: 5
-      lower_bound: 65000.0
-      upper_bound: 96000.0
+      levels_each_side: 50
+      lower_bound: 69000.0
+      upper_bound: 90000.0
 
 basket_profit_lock:
   enabled: true

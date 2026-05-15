@@ -30,12 +30,14 @@ This profile runs **alongside** the existing MT5 brain without touching the old 
 - **Negative DD auto-close is disabled** via `auto_close_loss_pct: 0.0` so losers are not force-closed before recovery.
 - Basket take profit is tightened to `$12`.
 
-## Current de-risked 5k live profile
+## Current dense-local 5k live profile
 - `risk_per_order: 7.5`
-- `grid_spacing / TP / SL = 600 / 1200 / 600`
+- `grid_spacing / TP / SL = 20 / 40 / 20`
 - `trend_guard_pct: 2.0`
 - `max_new_orders_per_bar: 1`
-- `levels_each_side: 5`
+- `levels_each_side: 50`
+- `BTC local ladder bounds: 69,000 -> 90,000`
+- `risk caps still limit live staged exposure to 30 total / 15 per side on the new 5k login`
 - `BTCUSD lots: 0.01` *(0.005 was rejected live by MT5 as invalid volume; 0.01 is the accepted floor)*
 
 This is the safer profile for the **new** 5k login. The old login continues on its separate runtime unchanged.
@@ -117,6 +119,7 @@ These endpoints are the fastest way to verify whether the bot is actually behavi
 ## Deployment note
 - Do **not** stop or reconfigure the original Atlas worker that is already tied to the old login.
 - The new 5k login should use only the `atlas-5k` profile files, port `8782`, magic `552701`, and worker ID `windows-mt5-atlas-5k-01`.
+- The VPS now stages dense local grid levels in alternating buy/sell order so the 5k runtime fills its capped exposure closer to market instead of exhausting side-skew limits on one side first.
 - If the Windows box runs the worker as NSSM or Task Scheduler, restart only the new Atlas 5k worker after updating `.env`.
 - Use the dedicated compose project name `atlas-5k` so compose does not try to replace the original `forex-brain` stack.
 

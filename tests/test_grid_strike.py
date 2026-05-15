@@ -147,6 +147,38 @@ def test_build_grid_plan_clamps_btc_to_tight_active_window_inside_wide_bounds() 
     assert plan.upper_bound == 73_000
 
 
+def test_build_grid_plan_keeps_explicit_btc_profile_spacing_inside_wide_bounds() -> None:
+    candidate = score_grid_candidate(
+        "BTCUSD",
+        candles_from([79_500 + (600 if i % 2 else -600) for i in range(96)]),
+        GridStrikeSettings(min_spacing_pips=20.0, max_spacing_pips=5_000.0),
+    )
+
+    plan = build_grid_plan(
+        candidate,
+        mid_price=79_500,
+        settings=GridStrikeSettings(
+            levels_each_side=50,
+            grid_spacing=20.0,
+            take_profit_spacing=40.0,
+            stop_loss_spacing=20.0,
+            symbol_grid_overrides={
+                "BTCUSD": {
+                    "levels_each_side": 50,
+                    "lower_bound": 69_000,
+                    "upper_bound": 90_000,
+                }
+            },
+        ),
+    )
+
+    assert plan.grid_spacing_pips == 20.0
+    assert plan.buy_levels[0].price == 79_480.0
+    assert plan.sell_levels[0].price == 79_520.0
+    assert plan.buy_levels[-1].price == 78_500.0
+    assert plan.sell_levels[-1].price == 80_500.0
+
+
 def test_eth_grid_uses_crypto_pip_size_and_two_decimal_rounding() -> None:
     candidate = score_grid_candidate(
         "ETHUSD",

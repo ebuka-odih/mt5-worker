@@ -72,7 +72,11 @@ class EntryGuardDecision:
     reason: str = ""
 
 
-def estimate_margin_usage_pct(snapshot: AccountRiskSnapshot, risk: RiskSettings) -> float:
+def estimate_margin_usage_pct(
+    snapshot: AccountRiskSnapshot,
+    risk: RiskSettings,
+    pending_position: PositionExposure | None = None,
+) -> float:
     if snapshot.equity <= 0:
         return 0.0
 
@@ -85,6 +89,10 @@ def estimate_margin_usage_pct(snapshot: AccountRiskSnapshot, risk: RiskSettings)
         if reference_price <= 0:
             continue
         margin_used += abs(reference_price * position.lots) / leverage
+    if pending_position is not None and pending_position.lots > 0:
+        reference_price = pending_position.entry_price or pending_position.current_price or 0.0
+        if reference_price > 0:
+            margin_used += abs(reference_price * pending_position.lots) / leverage
     return round((margin_used / snapshot.equity) * 100.0, 4)
 
 
@@ -93,6 +101,7 @@ def evaluate_entry_guard(
     side: str,
     snapshot: AccountRiskSnapshot,
     risk: RiskSettings,
+    pending_position: PositionExposure | None = None,
 ) -> EntryGuardDecision:
     symbol_key = symbol.upper().replace("/", "")
     side_key = side.lower()
@@ -143,7 +152,7 @@ def evaluate_entry_guard(
                 f"entry blocked: daily drawdown circuit breaker active ({floating_or_realized_loss:.2f}/{daily_loss_limit:.2f})",
             )
 
-    margin_usage_pct = estimate_margin_usage_pct(snapshot, risk)
+    margin_usage_pct = estimate_margin_usage_pct(snapshot, risk, pending_position=pending_position)
     if risk.max_margin_usage_pct > 0 and margin_usage_pct >= risk.max_margin_usage_pct:
         return EntryGuardDecision(
             False,

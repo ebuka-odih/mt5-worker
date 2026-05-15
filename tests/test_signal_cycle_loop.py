@@ -236,8 +236,55 @@ def test_scan_enqueues_multiple_grid_levels_per_symbol(monkeypatch) -> None:
     created = server._run_strategy_scan_once()
 
     assert len(created) == 4
-    assert [signal.side for signal in created] == [SignalSide.BUY, SignalSide.BUY, SignalSide.SELL, SignalSide.SELL]
+    assert [signal.side for signal in created] == [SignalSide.BUY, SignalSide.SELL, SignalSide.BUY, SignalSide.SELL]
     assert all(signal.symbol == "BTCUSD" for signal in created)
+
+
+def test_scan_interleaves_grid_sides_before_risk_caps_apply(monkeypatch) -> None:
+    monkeypatch.setattr(server.settings.market_data, "symbols", ["BTCUSD"])
+    monkeypatch.setattr(server, "provider", DummyProvider())
+    monkeypatch.setattr(server.settings.grid_strike, "enabled", True)
+    monkeypatch.setattr(server.settings.grid_strike, "levels_each_side", 5)
+    monkeypatch.setattr(server.settings.risk, "starting_balance", 5_000.0)
+    monkeypatch.setattr(server.settings.risk, "funded_challenge_mode", False)
+    monkeypatch.setattr(server.settings.risk, "max_open_positions", 5)
+    monkeypatch.setattr(server.settings.risk, "max_positions_per_symbol", 5)
+    monkeypatch.setattr(server.settings.risk, "max_same_side_positions", 3)
+    monkeypatch.setattr(server.settings.risk, "max_directional_skew", 1)
+    monkeypatch.setattr(server.settings.risk, "max_margin_usage_pct", 100.0)
+
+    def fail_if_legacy_signal_used(symbol: str, candles: pd.DataFrame, _settings) -> Signal:
+        raise AssertionError(f"legacy simple_signal path used for {symbol}")
+
+    monkeypatch.setattr(server, "simple_signal", fail_if_legacy_signal_used)
+    monkeypatch.setattr(server, "score_grid_candidate", lambda symbol, candles, _settings: _tradeable_candidate(symbol))
+    monkeypatch.setattr(server, "build_grid_plan", lambda candidate, mid_price=None, settings=None: _grid_plan(candidate.symbol, levels_each_side=5))
+
+    with server.STATE_LOCK:
+        server.HEARTBEATS["windows-mt5-atlas-5k-01"] = WorkerHeartbeat(
+            worker_id="windows-mt5-atlas-5k-01",
+            mt5_connected=True,
+            balance=5_000.0,
+            equity=5_000.0,
+            open_positions=1,
+            pending_orders=[],
+            positions=[
+                WorkerPosition(
+                    symbol="BTCUSD",
+                    side=SignalSide.SELL,
+                    lots=0.01,
+                    entry_price=100_000.0,
+                    current_price=100_000.0,
+                    profit=0.0,
+                    ticket=101,
+                )
+            ],
+        )
+
+    created = server._run_strategy_scan_once()
+
+    assert len(created) == 4
+    assert [signal.side for signal in created] == [SignalSide.BUY, SignalSide.SELL, SignalSide.BUY, SignalSide.SELL]
 
 
 def test_scan_allows_hedged_buy_and_sell_grid_levels_for_same_symbol(monkeypatch) -> None:

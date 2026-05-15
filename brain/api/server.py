@@ -216,11 +216,19 @@ def _risk_snapshot_locked(extra_positions: Optional[list[PositionExposure]] = No
 
 
 def _entry_guard_locked(signal: Signal, extra_positions: Optional[list[PositionExposure]] = None):
+    pending_position = PositionExposure(
+        symbol=_symbol_key(signal.symbol),
+        side=signal.side.value,
+        lots=float(signal.lots),
+        entry_price=signal.limit_price,
+        current_price=signal.limit_price,
+    )
     return evaluate_entry_guard(
         symbol=_symbol_key(signal.symbol),
         side=signal.side.value,
         snapshot=_risk_snapshot_locked(extra_positions=extra_positions),
         risk=settings.risk,
+        pending_position=pending_position,
     )
 
 
@@ -586,22 +594,30 @@ def _grid_plan_signals_locked(plan: GridPlan) -> list[Signal]:
     staged_positions: list[PositionExposure] = []
     grid_id = f"{_symbol_key(plan.symbol)}-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
 
-    for level in [*plan.buy_levels, *plan.sell_levels]:
+    ordered_levels = []
+    max_levels = max(len(plan.buy_levels), len(plan.sell_levels))
+    for index in range(max_levels):
+        if index < len(plan.buy_levels):
+            ordered_levels.append(plan.buy_levels[index])
+        if index < len(plan.sell_levels):
+            ordered_levels.append(plan.sell_levels[index])
+
+    for level in ordered_levels:
         signal = _grid_level_to_signal(plan, level, grid_id)
-        projected = staged_positions + [
-            PositionExposure(
-                symbol=_symbol_key(signal.symbol),
-                side=signal.side.value,
-                lots=float(signal.lots),
-                entry_price=signal.limit_price,
-                current_price=signal.limit_price,
-            )
-        ]
-        if not _should_enqueue_signal_locked(signal, extra_positions=projected):
+        projected_position = PositionExposure(
+            symbol=_symbol_key(signal.symbol),
+            side=signal.side.value,
+            lots=float(signal.lots),
+            entry_price=signal.limit_price,
+            current_price=signal.limit_price,
+        )
+        if not _should_enqueue_signal_locked(signal, extra_positions=list(staged_positions)):
             continue
-        SIGNALS[signal.id] = signal
-        staged_positions.append(projected[-1])
+        staged_positions.append(projected_position)
         created.append(signal)
+
+    for signal in created:
+        SIGNALS[signal.id] = signal
     return created
 
 
