@@ -99,6 +99,14 @@ venv\Scripts\python windows_mt5_worker.py
 - Worker log should show `MT5 connected`
 - Orders for this account should carry magic `552701`
 - Existing instance continues using port `8780` / magic `552501`
+- If `http://127.0.0.1:8780/health` is down, bring the old/default runtime back separately from the repo root before touching the new 5k worker:
+
+```bash
+docker compose up -d --build brain
+curl http://127.0.0.1:8780/health
+```
+
+That old/default stack is the **previous login**. The `atlas-5k` stack is the **new login**. They must stay on separate ports, worker IDs, and MT5 magics.
 
 ## Monitoring endpoints to keep for live tuning
 
@@ -118,6 +126,7 @@ These endpoints are the fastest way to verify whether the bot is actually behavi
 
 ## Deployment note
 - Do **not** stop or reconfigure the original Atlas worker that is already tied to the old login.
+- Do **not** edit the old Windows worker `.env` in place for this rollout. Copy `mt5-worker/.env.atlas-5k.example` into a dedicated `.env` for the new login and launch that worker separately.
 - The new 5k login should use only the `atlas-5k` profile files, port `8782`, magic `552701`, and worker ID `windows-mt5-atlas-5k-01`.
 - The VPS now stages dense local grid levels in alternating buy/sell order so the 5k runtime fills its capped exposure closer to market instead of exhausting side-skew limits on one side first.
 - If the Windows box runs the worker as NSSM or Task Scheduler, restart only the new Atlas 5k worker after updating `.env`.
