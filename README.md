@@ -80,6 +80,11 @@ If you are bringing up the **new Atlas 5k login** while keeping the old Atlas lo
 
 Do **not** replace the old worker `.env` or stop the original port `8780` service. Full deployment steps are in `docs/ATLAS_5K_SECOND_INSTANCE_SETUP.md`.
 
+Pre-flight check before restarting the Windows worker for the new 5k login:
+- old login runtime should answer on `http://127.0.0.1:8780/health`
+- new 5k runtime should answer on `http://127.0.0.1:8782/health`
+- if `8780` is down, recover the old/default stack separately before touching the new 5k worker
+
 On the VPS, launch the second instance with its own compose project name so the old stack stays untouched:
 
 ```bash

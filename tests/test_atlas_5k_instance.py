@@ -25,20 +25,20 @@ def test_atlas_5k_settings_profile_loads_expected_rules() -> None:
     assert settings.risk.max_positions_per_symbol == 30
     assert settings.risk.max_same_side_positions == 15
     assert settings.risk.max_directional_skew == 15
-    assert settings.risk.default_stop_loss_pips == 40
-    assert settings.risk.default_take_profit_pips == 80
+    assert settings.risk.default_stop_loss_pips == 600
+    assert settings.risk.default_take_profit_pips == 1200
     assert settings.risk.risk_per_order == 7.5
     assert settings.risk.daily_loss_budget == 75.0
     assert settings.risk.leverage == 10.0
     assert settings.risk.max_margin_usage_pct == 35.0
     assert settings.strategy.trend_guard_pct == 2.0
     assert settings.strategy.max_new_orders_per_bar == 1
-    assert settings.grid_strike.levels_each_side == 50
-    assert settings.grid_strike.grid_spacing == 20.0
-    assert settings.grid_strike.take_profit_spacing == 40.0
-    assert settings.grid_strike.stop_loss_spacing == 20.0
+    assert settings.grid_strike.levels_each_side == 5
+    assert settings.grid_strike.grid_spacing == 600.0
+    assert settings.grid_strike.take_profit_spacing == 1200.0
+    assert settings.grid_strike.stop_loss_spacing == 600.0
     btc_override = settings.grid_strike.symbol_grid_overrides["BTCUSD"]
-    assert btc_override["levels_each_side"] == 50
+    assert btc_override["levels_each_side"] == 5
     assert btc_override["lower_bound"] == 69_000.0
     assert btc_override["upper_bound"] == 90_000.0
     assert settings.grid_strike.get_lots("BTCUSD") == 0.01

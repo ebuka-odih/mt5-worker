@@ -30,15 +30,17 @@ This profile runs **alongside** the existing MT5 brain without touching the old 
 - **Negative DD auto-close is disabled** via `auto_close_loss_pct: 0.0` so losers are not force-closed before recovery.
 - Basket take profit is tightened to `$12`.
 
-## Current dense-local 5k live profile
+## Current safer 5k live profile
 - `risk_per_order: 7.5`
-- `grid_spacing / TP / SL = 20 / 40 / 20`
+- `default_stop_loss_pips / default_take_profit_pips = 600 / 1200`
+- `grid_spacing / TP / SL = 600 / 1200 / 600`
 - `trend_guard_pct: 2.0`
 - `max_new_orders_per_bar: 1`
-- `levels_each_side: 50`
+- `levels_each_side: 5`
 - `BTC local ladder bounds: 69,000 -> 90,000`
 - `risk caps still limit live staged exposure to 30 total / 15 per side on the new 5k login`
 - `BTCUSD lots: 0.01` *(0.005 was rejected live by MT5 as invalid volume; 0.01 is the accepted floor)*
+- `auto_close_loss_pct: 0.0` keeps the user's recovery-first loss policy intact for live trading
 
 This is the safer profile for the **new** 5k login. The old login continues on its separate runtime unchanged.
 

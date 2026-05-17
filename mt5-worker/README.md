@@ -28,6 +28,11 @@ venv\Scripts\python windows_mt5_worker.py
 
 Use the same real worker token in the deployed VPS `config/settings.atlas-5k.yaml` and the Windows `.env`, and restart only the new Atlas 5k worker after editing `.env`.
 
+Pre-flight check before restarting the new Windows worker:
+- old login runtime should still answer on `http://127.0.0.1:8780/health`
+- new Atlas 5k runtime should answer on `http://127.0.0.1:8782/health`
+- if `8780` is down, bring the old/default stack back separately first so this rollout does not replace the old login
+
 Helpful monitoring endpoints for this second login:
 - `/health`
 - `/api/signals`
