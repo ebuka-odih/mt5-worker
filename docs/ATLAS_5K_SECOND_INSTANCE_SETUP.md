@@ -67,7 +67,7 @@ notepad .env
 ```
 
 3. Set these values in `.env`:
-   - `VPS_API_BASE=https://<active-atlas-5k-tunnel-or-host>:8782` *(use the current live Atlas 5k endpoint; do not hardcode an expired quick-tunnel URL into git)*
+   - `VPS_API_BASE=https://<active-atlas-5k-tunnel>` **or** `http://<vps-host-or-ip>:8782` *(use the current live Atlas 5k endpoint; do not hardcode an expired quick-tunnel URL into git, and do not append `:8782` to a Cloudflare tunnel URL)*
    - `WORKER_TOKEN` = the same real token you placed in the deployed VPS copy of `config/settings.atlas-5k.yaml`
    - `WORKER_ID=windows-mt5-atlas-5k-01`
    - `MT5_MAGIC=552701`

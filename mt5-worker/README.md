@@ -51,21 +51,25 @@ Runtime note from pushed change `cc4d27d`:
 
 1. **Install Python dependencies:**
    ```cmd
-   cd C:\mt5-worker
+   cd C:\forex-mt5-bot\mt5-worker
    py -m venv venv
    venv\Scripts\activate
    pip install -r requirements.txt
    ```
 
 2. **Configure the worker:**
+   - For the **new Atlas 5k login**, create `.env` from `.env.atlas-5k.example` and keep the old login's `.env` untouched.
+   - For the generic/default worker, create `.env` from `.env.example`.
    ```cmd
-   copy .env.example .env
+   copy .env.atlas-5k.example .env
    notepad .env
    ```
    
    Edit `.env` and set:
-   - `VPS_API_BASE` - Your Cloudflare tunnel URL from the VPS
-   - `WORKER_TOKEN` - A strong random token (must match VPS)
+   - `VPS_API_BASE` - current Atlas 5k Cloudflare tunnel URL **or** direct host `http://<vps-host-or-ip>:8782`
+   - `WORKER_TOKEN` - the same real token deployed in the Atlas 5k VPS config
+   - `WORKER_ID=windows-mt5-atlas-5k-01`
+   - `MT5_MAGIC=552701`
 
 3. **Generate a strong token:**
    ```cmd
@@ -160,10 +164,10 @@ queues a new open signal so the worker can re-enter immediately.
 Download NSSM from https://nssm.cc/download and install as a Windows service:
 
 ```cmd
-nssm install MT5Worker "C:\mt5-worker\venv\Scripts\python.exe" "C:\mt5-worker\windows_mt5_worker.py"
-nssm set MT5Worker AppDirectory "C:\mt5-worker"
-nssm set MT5Worker AppStdout "C:\mt5-worker\worker.log"
-nssm set MT5Worker AppStderr "C:\mt5-worker\worker.log"
+nssm install MT5Worker "C:\forex-mt5-bot\mt5-worker\venv\Scripts\python.exe" "C:\forex-mt5-bot\mt5-worker\windows_mt5_worker.py"
+nssm set MT5Worker AppDirectory "C:\forex-mt5-bot\mt5-worker"
+nssm set MT5Worker AppStdout "C:\forex-mt5-bot\mt5-worker\worker.log"
+nssm set MT5Worker AppStderr "C:\forex-mt5-bot\mt5-worker\worker.log"
 nssm set MT5Worker AppRotateFiles 1
 nssm set MT5Worker AppRotateOnline 1
 nssm set MT5Worker AppRotateSeconds 86400
@@ -175,7 +179,7 @@ nssm start MT5Worker
 Create a scheduled task to run on Windows startup:
 
 ```cmd
-schtasks /create /tn "MT5 Worker" /tr "C:\mt5-worker\venv\Scripts\python.exe C:\mt5-worker\windows_mt5_worker.py" /sc onstart /rl limited
+schtasks /create /tn "MT5 Worker" /tr "C:\forex-mt5-bot\mt5-worker\venv\Scripts\python.exe C:\forex-mt5-bot\mt5-worker\windows_mt5_worker.py" /sc onstart /rl limited
 ```
 
 ## Go Live With VPS Auto-Loop
@@ -205,7 +209,7 @@ The VPS brain can now auto-generate signals in live mode. To use it safely:
 4. **Restart the worker**
    ```cmd
    taskkill /f /im python.exe
-   cd C:\mt5-worker
+   cd C:\forex-mt5-bot\mt5-worker
    start /b venv\Scripts\python windows_mt5_worker.py >> worker.log 2>&1
    ```
 
@@ -248,11 +252,12 @@ The VPS brain can now auto-generate signals in live mode. To use it safely:
 
 ## File Structure
 
-```
-C:\mt5-worker\
+```text
+C:\forex-mt5-bot\mt5-worker\
 ├── windows_mt5_worker.py   # Main worker script
-├── .env                    # Configuration (create from .env.example)
-├── .env.example            # Template for configuration
+├── .env                    # Configuration (create from .env.example or .env.atlas-5k.example)
+├── .env.example            # Template for default/generic worker configuration
+├── .env.atlas-5k.example   # Template for the isolated Atlas 5k second login
 ├── requirements.txt        # Python dependencies
 ├── README.md               # This file
 └── worker.log              # Log output (created on first run)
