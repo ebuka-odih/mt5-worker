@@ -72,9 +72,10 @@ Verify both runtimes independently:
 - Internal daily loss budget: `$600`
 - Risk per order budget: `$125`
 - Grid range: `60000` lower to `90000` upper
-- Sparse grid map: `100` levels total (`50` buy levels below mid, `50` sell levels above mid)
-- Grid / TP / SL spacing: `300 / 300 / 300`
-- Active population cap: `10` open/pending positions total, `5` per side
+- Sparse grid map: `34` levels total (`17` buy levels below mid, `17` sell levels above mid)
+- Grid / TP / SL spacing target: `900 / 1800 / 900` with a favorable 2:1 TP-to-SL ratio
+- Backtest note: the previous `300 / 300 / 300` 100-level 1:1 profile was not good enough on real 42d Bybit BTC data (`-$1,837.50` realized PnL, `3.67%` max drawdown). The safer profile preserves the `60000` to `90000` BTC operating range but reduces the resting map to 34 total levels so spacing is roughly `$882` per level inside the range while TP remains twice SL.
+- Active population cap: `6` open/pending positions total, `3` per side
 - BTC lots: `0.05` per level
 
 This note is intentionally scoped to the **new login account** deployment.

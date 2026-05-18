@@ -22,17 +22,19 @@ def test_atlas_50k_instant_settings_profile_loads_expected_rules() -> None:
     assert settings.risk.max_total_drawdown_pct == 5.0
     assert settings.risk.daily_loss_budget == 600.0
     assert settings.risk.risk_per_order == 125.0
-    assert settings.risk.max_open_positions == 10
-    assert settings.risk.max_positions_per_symbol == 10
-    assert settings.risk.max_same_side_positions == 5
+    assert settings.risk.max_open_positions == 6
+    assert settings.risk.max_positions_per_symbol == 6
+    assert settings.risk.max_same_side_positions == 3
     assert settings.risk.max_directional_skew == 1
-    assert settings.grid_strike.levels_each_side == 50
-    assert settings.grid_strike.grid_spacing == 300.0
-    assert settings.grid_strike.take_profit_spacing == 300.0
-    assert settings.grid_strike.stop_loss_spacing == 300.0
+    assert settings.risk.default_stop_loss_pips == 900.0
+    assert settings.risk.default_take_profit_pips == 1800.0
+    assert settings.grid_strike.levels_each_side == 17
+    assert settings.grid_strike.grid_spacing == 900.0
+    assert settings.grid_strike.take_profit_spacing == 1800.0
+    assert settings.grid_strike.stop_loss_spacing == 900.0
     assert settings.grid_strike.symbol_lots["BTCUSD"] == 0.05
     btc_override = settings.grid_strike.symbol_grid_overrides["BTCUSD"]
-    assert btc_override["levels_each_side"] == 50
+    assert btc_override["levels_each_side"] == 17
     assert btc_override["lower_bound"] == 60000.0
     assert btc_override["upper_bound"] == 90000.0
     assert settings.mt5_worker.magic_number == 552650
@@ -40,7 +42,7 @@ def test_atlas_50k_instant_settings_profile_loads_expected_rules() -> None:
     assert settings.api.worker_token != "CHANGE_ME_LONG_RANDOM_TOKEN"
 
 
-def test_atlas_50k_btc_grid_plan_uses_sparse_100_level_range_and_safe_lots() -> None:
+def test_atlas_50k_btc_grid_plan_uses_safer_sparse_range_and_safe_lots() -> None:
     settings = load_settings(PROJECT_ROOT / "config/settings.atlas-50k-instant.yaml")
     candidate = GridStrikeCandidate(
         symbol="BTCUSD",
@@ -52,20 +54,22 @@ def test_atlas_50k_btc_grid_plan_uses_sparse_100_level_range_and_safe_lots() -> 
         trend_ratio=0.1,
         atr_pips=250.0,
         spread_pips=0.0,
-        grid_spacing_pips=300.0,
+        grid_spacing_pips=900.0,
         reason="test",
     )
 
     plan = build_grid_plan(candidate, mid_price=75000.0, settings=settings.grid_strike)
 
     assert plan.lots_per_level == 0.05
-    assert len(plan.buy_levels) == 50
-    assert len(plan.sell_levels) == 50
-    assert len(plan.buy_levels) + len(plan.sell_levels) == 100
+    assert len(plan.buy_levels) == 17
+    assert len(plan.sell_levels) == 17
+    assert len(plan.buy_levels) + len(plan.sell_levels) == 34
     assert plan.lower_bound == 60000.0
     assert plan.upper_bound == 90000.0
-    assert plan.buy_levels[0].price == 74700.0
-    assert plan.sell_levels[0].price == 75300.0
+    assert plan.buy_levels[0].price == 74117.65
+    assert plan.sell_levels[0].price == 75882.35
+    assert 880.0 <= plan.grid_spacing_pips <= 885.0
+    assert settings.grid_strike.take_profit_spacing > settings.grid_strike.stop_loss_spacing
 
 
 def test_atlas_50k_windows_deployment_note_mentions_new_login_and_old_runtime_safety() -> None:
