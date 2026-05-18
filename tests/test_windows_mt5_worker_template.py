@@ -22,3 +22,23 @@ def test_windows_worker_can_load_profile_specific_env_file():
     assert "--env-file" in text
     assert "WORKER_ENV_FILE" in text
     assert "load_dotenv(ENV_FILE)" in text
+
+
+def test_profile_env_examples_require_expected_mt5_login_validation():
+    atlas_5k = Path("mt5-worker/.env.atlas-5k.example").read_text()
+    atlas_50k = Path("mt5-worker/.env.atlas-50k.example").read_text()
+
+    assert "EXPECTED_MT5_LOGIN=" in atlas_5k
+    assert "EXPECTED_MT5_LOGIN=" in atlas_50k
+    assert "EXPECTED_MT5_LOGIN=CHANGE_ME_ATLAS_5K_LOGIN" in atlas_5k
+    assert "EXPECTED_MT5_LOGIN=CHANGE_ME_ATLAS_50K_LOGIN" in atlas_50k
+
+
+def test_worker_docs_show_one_script_profile_env_and_login_validation():
+    readme = Path("mt5-worker/README.md").read_text()
+
+    assert "one shared `windows_mt5_worker.py`" in readme
+    assert "--env-file .env.atlas-5k" in readme
+    assert "--env-file .env.atlas-50k" in readme
+    assert "EXPECTED_MT5_LOGIN" in readme
+    assert "Expected MT5 login" in readme

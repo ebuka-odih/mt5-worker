@@ -64,12 +64,26 @@ def _env_file_from_args(argv: list[str]) -> str:
 ENV_FILE = _env_file_from_args(sys.argv)
 load_dotenv(ENV_FILE)
 
+
+def _optional_int_env(name: str) -> Optional[int]:
+    """Return an optional integer env var, treating placeholders as unset."""
+    value = os.getenv(name, "").strip()
+    if not value or value.upper().startswith("CHANGE_ME") or value.startswith("<"):
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        logger.error("%s must be an integer MT5 account login, got %r", name, value)
+        sys.exit(1)
+
+
 API_BASE = os.getenv("VPS_API_BASE", "http://127.0.0.1:8780").rstrip("/")
 TOKEN = os.getenv("WORKER_TOKEN", "")
 WORKER_ID = os.getenv("WORKER_ID", "windows-mt5-local-01")
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 POLL_SECONDS = float(os.getenv("POLL_SECONDS", "1"))
 MAGIC = int(os.getenv("MT5_MAGIC", "552501"))
+EXPECTED_MT5_LOGIN = _optional_int_env("EXPECTED_MT5_LOGIN")
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 RETRY_DELAY = float(os.getenv("RETRY_DELAY", "2"))
 
@@ -156,10 +170,35 @@ class MT5State:
             logger.info("Shutting down MT5 connection...")
             mt5.shutdown()
             self.initialized = False
+            self.account_login = None
+            self.broker = None
+            self.balance = None
+            self.equity = None
 
 
 # Global MT5 state
 _mt5_state = MT5State()
+
+
+def validate_expected_account() -> tuple[bool, str | None]:
+    """Verify the running MT5 terminal is logged into the configured account."""
+    global _mt5_state
+    if EXPECTED_MT5_LOGIN is None:
+        return True, None
+    if mt5 is None:
+        return False, "MetaTrader5 package not installed"
+    account = mt5.account_info()
+    actual_login = getattr(account, "login", None)
+    _mt5_state.account_login = actual_login
+    _mt5_state.broker = getattr(account, "server", None)
+    _mt5_state.balance = getattr(account, "balance", None)
+    _mt5_state.equity = getattr(account, "equity", None)
+    if actual_login != EXPECTED_MT5_LOGIN:
+        message = f"Expected MT5 login {EXPECTED_MT5_LOGIN} but terminal is logged into {actual_login}"
+        logger.error("%s. Refusing to trade from env file %s.", message, ENV_FILE)
+        _mt5_state.shutdown()
+        return False, message
+    return True, None
 
 
 def _position_side(position_type: Any) -> str:
@@ -262,23 +301,37 @@ def send_heartbeat() -> None:
     global _mt5_state
 
     if _mt5_state.ensure_initialized():
-        account = mt5.account_info()
-        positions = mt5.positions_get() or []
-        pending_orders = mt5.orders_get() or []
-        positions_payload = _serialize_positions(list(positions))
-        pending_orders_payload = _serialize_pending_orders(list(pending_orders))
-        payload = {
-            "worker_id": WORKER_ID,
-            "mt5_connected": True,
-            "account_login": getattr(account, "login", None),
-            "broker": getattr(account, "server", None),
-            "balance": getattr(account, "balance", None),
-            "equity": getattr(account, "equity", None),
-            "open_positions": len(positions),
-            "positions": positions_payload,
-            "pending_orders": pending_orders_payload,
-            "dry_run": DRY_RUN,
-        }
+        account_ok, account_error = validate_expected_account()
+        if not account_ok:
+            payload = {
+                "worker_id": WORKER_ID,
+                "mt5_connected": False,
+                "account_login": EXPECTED_MT5_LOGIN,
+                "connection_error": account_error,
+                "open_positions": 0,
+                "positions": [],
+                "pending_orders": [],
+                "dry_run": DRY_RUN,
+            }
+        else:
+            account = mt5.account_info()
+            positions = mt5.positions_get() or []
+            pending_orders = mt5.orders_get() or []
+            positions_payload = _serialize_positions(list(positions))
+            pending_orders_payload = _serialize_pending_orders(list(pending_orders))
+            payload = {
+                "worker_id": WORKER_ID,
+                "mt5_connected": True,
+                "account_login": getattr(account, "login", None),
+                "expected_account_login": EXPECTED_MT5_LOGIN,
+                "broker": getattr(account, "server", None),
+                "balance": getattr(account, "balance", None),
+                "equity": getattr(account, "equity", None),
+                "open_positions": len(positions),
+                "positions": positions_payload,
+                "pending_orders": pending_orders_payload,
+                "dry_run": DRY_RUN,
+            }
     else:
         payload = {
             "worker_id": WORKER_ID,
@@ -374,6 +427,11 @@ def execute_signal(signal: dict[str, Any]) -> None:
 
     if not _mt5_state.ensure_initialized():
         report(signal_id, "rejected", "MT5 not connected or initialization failed")
+        return
+
+    account_ok, account_error = validate_expected_account()
+    if not account_ok:
+        report(signal_id, "rejected", account_error or "MT5 account login validation failed")
         return
 
     request: dict[str, Any]
@@ -555,12 +613,16 @@ def main() -> None:
     logger.info(f"  Worker ID: {WORKER_ID}")
     logger.info(f"  VPS API:   {API_BASE}")
     logger.info(f"  Dry Run:   {DRY_RUN}")
+    logger.info(f"  Expected MT5 Login: {EXPECTED_MT5_LOGIN or 'not enforced'}")
     logger.info(f"  Poll Interval: {POLL_SECONDS}s")
 
     # Initial MT5 check
     if _mt5_state.ensure_initialized():
+        account_ok, account_error = validate_expected_account()
         account = mt5.account_info()
         logger.info(f"MT5 connected: login={getattr(account, 'login', 'N/A')}, server={getattr(account, 'server', 'N/A')}, balance={getattr(account, 'balance', 'N/A')}")
+        if not account_ok:
+            logger.error("MT5 account validation failed at startup: %s", account_error)
 
     last_hb = 0.0
 

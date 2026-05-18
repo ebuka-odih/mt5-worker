@@ -21,12 +21,23 @@ Windows update pattern for the new 5k login only:
 cd C:\forex-mt5-bot
 git pull
 cd mt5-worker
-copy .env.atlas-5k.example .env
-notepad .env
-venv\Scripts\python windows_mt5_worker.py
+copy .env.atlas-5k.example .env.atlas-5k
+notepad .env.atlas-5k
+venv\Scripts\python windows_mt5_worker.py --env-file .env.atlas-5k
 ```
 
-Use the same real worker token in the deployed VPS `config/settings.atlas-5k.yaml` and the Windows `.env`, and restart only the new Atlas 5k worker after editing `.env`.
+Use one shared `windows_mt5_worker.py` for every funded account. Keep isolation in profile-specific env files such as `.env.atlas-5k` and `.env.atlas-50k`, then launch each worker with its matching profile:
+
+```cmd
+venv\Scripts\python windows_mt5_worker.py --env-file .env.atlas-5k
+venv\Scripts\python windows_mt5_worker.py --env-file .env.atlas-50k
+```
+
+Do not copy the new profile over the old worker's live `.env`.
+
+Set `EXPECTED_MT5_LOGIN` in each profile env to the exact account login shown in that Windows MT5 terminal. If MT5 is logged into a different account, the worker logs `Expected MT5 login ... but terminal is logged into ...`, refuses to send orders, and reports the signal as rejected.
+
+Use the same real worker token in the deployed VPS `config/settings.atlas-5k.yaml` and the Windows `.env.atlas-5k`, and restart only the new Atlas 5k worker after editing `.env.atlas-5k`.
 
 Pre-flight check before restarting the new Windows worker:
 - old login runtime should still answer on `http://127.0.0.1:8780/health`

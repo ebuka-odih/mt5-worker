@@ -27,11 +27,19 @@ class FakeMT5:
     TRADE_RETCODE_DONE = 10009
     TRADE_RETCODE_PLACED = 10008
 
-    def __init__(self, retcode: int | None = None):
+    def __init__(self, retcode: int | None = None, account_login: int = 5000):
         self.retcode = retcode if retcode is not None else self.TRADE_RETCODE_DONE
+        self.account_login = account_login
         self.last_request = None
+        self.shutdown_called = False
         self.position_ticket_requests: list[int | None] = []
         self.order_ticket_requests: list[int | None] = []
+
+    def account_info(self):
+        return SimpleNamespace(login=self.account_login, server="TestBroker-Demo", balance=5000.0, equity=5000.0)
+
+    def shutdown(self):
+        self.shutdown_called = True
 
     def initialize(self):
         return True
@@ -167,6 +175,29 @@ def test_execute_signal_cancels_pending_order_without_touching_positions(monkeyp
     assert mt5.position_ticket_requests == []
     assert reports and reports[0][0][1] == "cancelled"
     assert reports[0][0][2] == "MT5 pending order cancelled"
+
+
+def test_execute_signal_rejects_when_terminal_is_logged_into_wrong_expected_account(monkeypatch):
+    mt5 = FakeMT5(account_login=5001)
+    monkeypatch.setenv("EXPECTED_MT5_LOGIN", "5000")
+    worker = _load_worker_module(monkeypatch, mt5)
+
+    reports = []
+    monkeypatch.setattr(worker, "report", lambda *args, **kwargs: reports.append((args, kwargs)))
+
+    worker.execute_signal(
+        {
+            "id": "wrong-login-1",
+            "symbol": "EURUSD",
+            "side": "buy",
+            "lots": 0.05,
+        }
+    )
+
+    assert mt5.last_request is None
+    assert mt5.shutdown_called is True
+    assert reports and reports[0][0][1] == "rejected"
+    assert "Expected MT5 login 5000 but terminal is logged into 5001" in reports[0][0][2]
 
 
 def test_serialize_positions_normalizes_future_shifted_mt5_times(monkeypatch, caplog):
