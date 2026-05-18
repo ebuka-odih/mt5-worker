@@ -74,18 +74,20 @@ Runtime note from pushed change `cc4d27d`:
    ```
 
 2. **Configure the worker:**
-   - For the **new Atlas 5k login**, create `.env` from `.env.atlas-5k.example` and keep the old login's `.env` untouched.
+   - For the **new Atlas 5k login**, create `.env.atlas-5k` from `.env.atlas-5k.example` and keep the old login's `.env` untouched.
    - For the generic/default worker, create `.env` from `.env.example`.
    ```cmd
-   copy .env.atlas-5k.example .env
-   notepad .env
+   copy .env.atlas-5k.example .env.atlas-5k
+   notepad .env.atlas-5k
    ```
    
-   Edit `.env` and set:
+   Edit `.env.atlas-5k` and set:
    - `VPS_API_BASE` - current Atlas 5k Cloudflare tunnel URL **or** direct host `http://<vps-host-or-ip>:8782`
    - `WORKER_TOKEN` - the same real token deployed in the Atlas 5k VPS config
    - `WORKER_ID=windows-mt5-atlas-5k-01`
+   - `EXPECTED_MT5_LOGIN=<exact-new-atlas-5k-mt5-login>` from the new MT5 account info
    - `MT5_MAGIC=552701`
+   - `DRY_RUN=true until the first connection/heartbeat is established`; switch to `false` only when ready to execute trades on the new 5k login
 
 3. **Generate a strong token:**
    ```cmd
@@ -99,12 +101,12 @@ Runtime note from pushed change `cc4d27d`:
 
 **Start the worker:**
 ```cmd
-venv\Scripts\python windows_mt5_worker.py
+venv\Scripts\python windows_mt5_worker.py --env-file .env.atlas-5k
 ```
 
 **Run in background (persistent):**
 ```cmd
-start /b venv\Scripts\python windows_mt5_worker.py >> worker.log 2>&1
+start /b venv\Scripts\python windows_mt5_worker.py --env-file .env.atlas-5k >> worker-atlas-5k.log 2>&1
 ```
 
 **Check if running:**
@@ -180,14 +182,14 @@ queues a new open signal so the worker can re-enter immediately.
 Download NSSM from https://nssm.cc/download and install as a Windows service:
 
 ```cmd
-nssm install MT5Worker "C:\forex-mt5-bot\mt5-worker\venv\Scripts\python.exe" "C:\forex-mt5-bot\mt5-worker\windows_mt5_worker.py"
-nssm set MT5Worker AppDirectory "C:\forex-mt5-bot\mt5-worker"
-nssm set MT5Worker AppStdout "C:\forex-mt5-bot\mt5-worker\worker.log"
-nssm set MT5Worker AppStderr "C:\forex-mt5-bot\mt5-worker\worker.log"
-nssm set MT5Worker AppRotateFiles 1
-nssm set MT5Worker AppRotateOnline 1
-nssm set MT5Worker AppRotateSeconds 86400
-nssm start MT5Worker
+nssm install MT5WorkerAtlas5K "C:\forex-mt5-bot\mt5-worker\venv\Scripts\python.exe" "C:\forex-mt5-bot\mt5-worker\windows_mt5_worker.py --env-file .env.atlas-5k"
+nssm set MT5WorkerAtlas5K AppDirectory "C:\forex-mt5-bot\mt5-worker"
+nssm set MT5WorkerAtlas5K AppStdout "C:\forex-mt5-bot\mt5-worker\worker-atlas-5k.log"
+nssm set MT5WorkerAtlas5K AppStderr "C:\forex-mt5-bot\mt5-worker\worker-atlas-5k.log"
+nssm set MT5WorkerAtlas5K AppRotateFiles 1
+nssm set MT5WorkerAtlas5K AppRotateOnline 1
+nssm set MT5WorkerAtlas5K AppRotateSeconds 86400
+nssm start MT5WorkerAtlas5K
 ```
 
 ### Using Task Scheduler
@@ -195,7 +197,7 @@ nssm start MT5Worker
 Create a scheduled task to run on Windows startup:
 
 ```cmd
-schtasks /create /tn "MT5 Worker" /tr "C:\forex-mt5-bot\mt5-worker\venv\Scripts\python.exe C:\forex-mt5-bot\mt5-worker\windows_mt5_worker.py" /sc onstart /rl limited
+schtasks /create /tn "MT5WorkerAtlas5K" /tr "C:\forex-mt5-bot\mt5-worker\venv\Scripts\python.exe C:\forex-mt5-bot\mt5-worker\windows_mt5_worker.py --env-file .env.atlas-5k" /sc onstart /rl limited
 ```
 
 ## Go Live With VPS Auto-Loop

@@ -144,14 +144,14 @@ pip install -r requirements.txt
 
 **3. Configure the worker:**
 
-For the **new Atlas 5k login**, do not reuse the old worker's live `.env`. Create the new worker env from the dedicated Atlas 5k template instead:
+For the **new Atlas 5k login**, do not reuse the old worker's live `.env`. Create a profile-specific env file from the dedicated Atlas 5k template instead:
 
 ```cmd
-copy .env.atlas-5k.example .env
-notepad .env
+copy .env.atlas-5k.example .env.atlas-5k
+notepad .env.atlas-5k
 ```
 
-Edit `.env` with these values:
+Edit `.env.atlas-5k` with these values:
 
 ```env
 # VPS Brain URL (use the active Atlas 5k tunnel or direct 8782 host)
@@ -162,36 +162,41 @@ VPS_API_BASE=https://<fresh-atlas-5k-tunnel>.trycloudflare.com
 # Worker auth token (MUST match deployed Atlas 5k VPS config; do not commit real tokens)
 WORKER_TOKEN=<set-to-atlas-5k-worker-token>
 
-# Dedicated worker identity for the new 5k login
+# Dedicated worker identity and login guard for the new 5k login
 WORKER_ID=windows-mt5-atlas-5k-01
+EXPECTED_MT5_LOGIN=<exact-new-atlas-5k-mt5-login>
 MT5_MAGIC=552701
 
-# Start with DRY_RUN=true, then false for live
+# Keep DRY_RUN=true until the first connection/heartbeat is established.
+# Change to false only when ready to execute live trades on the new 5k login.
 DRY_RUN=true
 ```
 
 **4. Test in dry-run mode first:**
 
 ```cmd
-venv\Scripts\python windows_mt5_worker.py
+venv\Scripts\python windows_mt5_worker.py --env-file .env.atlas-5k
 ```
 
 You should see:
 ```
 [INFO] mt5-worker: Starting Windows MT5 worker
+[INFO] mt5-worker:   Worker ID: windows-mt5-atlas-5k-01
 [INFO] mt5-worker:   VPS API:   https://<fresh-atlas-5k-tunnel>.trycloudflare.com
 [INFO] mt5-worker:   Dry Run:   True
 [INFO] mt5-worker: MT5 connected: login=XXXXX, server=AtlasFunded, balance=5000.0
 ```
 
-**5. Go live (only after dry-run looks good):**
+The `login=XXXXX` value must match `EXPECTED_MT5_LOGIN`; otherwise the worker refuses live orders so the old MT5 account cannot accidentally receive the new 5k signals.
 
-Edit `.env`:
+**5. Go live (only after connection/heartbeat is established):**
+
+Edit `.env.atlas-5k`:
 ```env
 DRY_RUN=false
 ```
 
-Restart the worker.
+Restart only the Atlas 5k worker/service. Do not use `taskkill /f /im python.exe` for this rollout because that can stop the old login worker too.
 
 **6. Pull future updates on Windows:**
 
@@ -199,7 +204,7 @@ Restart the worker.
 cd C:\forex-mt5-bot
 git pull
 cd mt5-worker
-venv\Scripts\python windows_mt5_worker.py
+venv\Scripts\python windows_mt5_worker.py --env-file .env.atlas-5k
 ```
 
 For this Atlas 5k rollout, restart only the **new** 5k worker/service after `git pull`. Leave the old login worker/service untouched.
@@ -215,17 +220,17 @@ start /b venv\Scripts\python windows_mt5_worker.py >> worker.log 2>&1
 
 **Option B — Windows Service with NSSM:**
 ```cmd
-nssm install MT5Worker "C:\forex-mt5-bot\mt5-worker\venv\Scripts\python.exe" "C:\forex-mt5-bot\mt5-worker\windows_mt5_worker.py"
-nssm set MT5Worker AppDirectory "C:\forex-mt5-bot\mt5-worker"
-nssm set MT5Worker AppStdout "C:\forex-mt5-bot\mt5-worker\worker.log"
-nssm set MT5Worker AppStderr "C:\forex-mt5-bot\mt5-worker\worker.log"
-nssm set MT5Worker AppRotateFiles 1
-nssm start MT5Worker
+nssm install MT5WorkerAtlas5K "C:\forex-mt5-bot\mt5-worker\venv\Scripts\python.exe" "C:\forex-mt5-bot\mt5-worker\windows_mt5_worker.py --env-file .env.atlas-5k"
+nssm set MT5WorkerAtlas5K AppDirectory "C:\forex-mt5-bot\mt5-worker"
+nssm set MT5WorkerAtlas5K AppStdout "C:\forex-mt5-bot\mt5-worker\worker-atlas-5k.log"
+nssm set MT5WorkerAtlas5K AppStderr "C:\forex-mt5-bot\mt5-worker\worker-atlas-5k.log"
+nssm set MT5WorkerAtlas5K AppRotateFiles 1
+nssm start MT5WorkerAtlas5K
 ```
 
 **Option C — Task Scheduler (auto-start on boot):**
 ```cmd
-schtasks /create /tn "MT5 Worker" /tr "C:\forex-mt5-bot\mt5-worker\venv\Scripts\python.exe C:\forex-mt5-bot\mt5-worker\windows_mt5_worker.py" /sc onstart /rl limited
+schtasks /create /tn "MT5WorkerAtlas5K" /tr "C:\forex-mt5-bot\mt5-worker\venv\Scripts\python.exe C:\forex-mt5-bot\mt5-worker\windows_mt5_worker.py --env-file .env.atlas-5k" /sc onstart /rl limited
 ```
 
 ## Configuration Reference
@@ -293,20 +298,18 @@ The token must be identical on both sides:
 ## Quick Reference Commands
 
 ```cmd
-:: Start worker
-venv\Scripts\python windows_mt5_worker.py
+:: Start the new Atlas 5k worker only
+venv\Scripts\python windows_mt5_worker.py --env-file .env.atlas-5k
 
-:: View logs
-type worker.log
+:: View the new Atlas 5k worker logs
+type worker-atlas-5k.log
 
 :: Check if running
 tasklist | findstr python
 
-:: Stop worker
-taskkill /f /im python.exe
-
-:: Restart
-taskkill /f /im python.exe && venv\Scripts\python windows_mt5_worker.py
+:: Stop/restart the new Atlas 5k worker through its dedicated NSSM service or Task Scheduler entry.
+:: Do not use taskkill /f /im python.exe for the second-login rollout because it can stop the old login worker too.
+nssm restart MT5WorkerAtlas5K
 ```
 
 ## Go Live Checklist (Auto-Loop + Windows Pull)

@@ -79,38 +79,40 @@ git pull
 cd mt5-worker
 ```
 
-2. Copy the safe template to `.env` and edit it:
+2. Copy the safe template to a **profile-specific** env file and edit it. Do not overwrite the old login's `.env`.
 
 ```cmd
-copy .env.atlas-5k.example .env
-notepad .env
+copy .env.atlas-5k.example .env.atlas-5k
+notepad .env.atlas-5k
 ```
 
-3. Set these values in `.env`:
+3. Set these values in `.env.atlas-5k`:
    - `VPS_API_BASE=https://<active-atlas-5k-tunnel>` **or** `http://<vps-host-or-ip>:8782` *(use the current live Atlas 5k endpoint; do not hardcode an expired quick-tunnel URL into git, and do not append `:8782` to a Cloudflare tunnel URL)*
    - `WORKER_TOKEN` = the same real token you placed in the deployed VPS copy of `config/settings.atlas-5k.yaml`
    - `WORKER_ID=windows-mt5-atlas-5k-01`
+   - `EXPECTED_MT5_LOGIN=<exact-new-atlas-5k-mt5-login>` from the MT5 terminal title/account info
    - `MT5_MAGIC=552701`
-   - `DRY_RUN=false` only when you want live execution on the new 5k account
+   - `DRY_RUN=true until the first connection/heartbeat is established`; change to `false` only after the worker is connected to the new 5k MT5 login and you are ready for live order execution
 
-   Example:
+   Deploy-ready `.env.atlas-5k` shape:
    ```env
    VPS_API_BASE=https://<active-atlas-5k-tunnel-or-host>
    WORKER_TOKEN=<same-token-as-config/settings.atlas-5k.yaml>
    WORKER_ID=windows-mt5-atlas-5k-01
-   DRY_RUN=false
+   EXPECTED_MT5_LOGIN=<exact-new-atlas-5k-mt5-login>
+   DRY_RUN=true
    MT5_MAGIC=552701
    POLL_SECONDS=1
    HEARTBEAT_SECONDS=10
    REQUEST_TIMEOUT_MS=5000
    ```
 
-4. Ensure the MT5 terminal is logged into the **new Atlas 5k funded account**.
-5. Start the worker:
+4. Ensure the MT5 terminal is logged into the **new Atlas 5k funded account**. The worker rejects live signals if `EXPECTED_MT5_LOGIN` does not match the terminal login.
+5. Start the worker with the profile-specific env file:
 
 ```cmd
 cd C:\forex-mt5-bot\mt5-worker
-venv\Scripts\python windows_mt5_worker.py
+venv\Scripts\python windows_mt5_worker.py --env-file .env.atlas-5k
 ```
 
 ## Verification
