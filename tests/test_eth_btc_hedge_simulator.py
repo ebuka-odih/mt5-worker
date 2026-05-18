@@ -23,11 +23,18 @@ def test_config_tracks_btc_and_eth_for_same_funded_challenge_account() -> None:
     settings = load_settings()
 
     assert settings.market_data.provider == "bybit"
-    assert settings.market_data.symbols == ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD"]
+    assert settings.market_data.symbols == ["BTCUSD", "ETHUSD"]
     assert settings.risk.starting_balance == 400_000
     assert settings.risk.max_risk_per_trade_pct == 0.44
     assert settings.risk.max_total_drawdown_pct == 4.0
+    assert settings.risk.max_open_positions == 350
+    assert settings.risk.max_positions_per_symbol == 200
+    assert settings.risk.max_same_side_positions == 175
+    assert settings.risk.max_directional_skew == 175
     assert settings.grid_strike.levels_each_side * 2 == 1000
+    assert settings.grid_strike.symbol_lots == {"BTCUSD": 0.05, "ETHUSD": 0.5}
+    assert settings.grid_strike.symbol_grid_overrides["BTCUSD"]["levels_each_side"] == 60
+    assert settings.grid_strike.symbol_grid_overrides["ETHUSD"]["levels_each_side"] == 40
 
 
 def test_portfolio_simulator_shares_drawdown_budget_across_btc_and_eth() -> None:
