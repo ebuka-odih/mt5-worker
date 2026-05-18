@@ -25,13 +25,13 @@ risk:
   funded_challenge_mode: true
   challenge_min_days: 5
   challenge_max_days: 999
-  max_open_positions: 6
-  max_positions_per_symbol: 6
-  max_same_side_positions: 3
-  max_directional_skew: 1
-  default_stop_loss_pips: 900
-  default_take_profit_pips: 1800
-  min_rr: 2.0
+  max_open_positions: 20
+  max_positions_per_symbol: 20
+  max_same_side_positions: 10
+  max_directional_skew: 4
+  default_stop_loss_pips: 350
+  default_take_profit_pips: 525
+  min_rr: 1.5
   risk_per_order: 125.0
   daily_loss_budget: 600.0
   leverage: 10.0
@@ -47,7 +47,7 @@ strategy:
   rsi_sell_above: 65
   trend_guard_bars: 6
   trend_guard_pct: 2.0
-  max_new_orders_per_bar: 1
+  max_new_orders_per_bar: 5
 
 grid_strike:
   enabled: true
@@ -56,12 +56,12 @@ grid_strike:
   max_range_pct: 18.00
   max_trend_ratio: 0.65
   lookback_candles: 720
-  levels_each_side: 17
-  min_spacing_pips: 900.0
-  max_spacing_pips: 900.0
-  grid_spacing: 900.0
-  take_profit_spacing: 1800.0
-  stop_loss_spacing: 900.0
+  levels_each_side: 43
+  min_spacing_pips: 350.0
+  max_spacing_pips: 350.0
+  grid_spacing: 350.0
+  take_profit_spacing: 525.0
+  stop_loss_spacing: 350.0
   atr_period: 14
   atr_spacing_multiplier: 1.25
   session_start_hour_utc: 6
@@ -72,7 +72,7 @@ grid_strike:
     BTCUSD: 0.05
   symbol_grid_overrides:
     BTCUSD:
-      levels_each_side: 17
+      levels_each_side: 43
       lower_bound: 60000.0
       upper_bound: 90000.0
 

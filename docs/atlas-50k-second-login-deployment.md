@@ -63,7 +63,7 @@ Verify both runtimes independently:
 - new 50k runtime responds on `http://127.0.0.1:8783/health`
 - if the old runtime is down, recover it separately first instead of replacing it with the new login stack
 
-## 50k BTC-only starting profile shipped in this repo
+## 50k BTC-only balanced-grid profile shipped in this repo
 
 - Balance: `50000`
 - Symbols: `BTCUSD` only
@@ -72,10 +72,10 @@ Verify both runtimes independently:
 - Internal daily loss budget: `$600`
 - Risk per order budget: `$125`
 - Grid range: `60000` lower to `90000` upper
-- Sparse grid map: `34` levels total (`17` buy levels below mid, `17` sell levels above mid)
-- Grid / TP / SL spacing target: `900 / 1800 / 900` with a favorable 2:1 TP-to-SL ratio
-- Backtest note: the previous `300 / 300 / 300` 100-level 1:1 profile was not good enough on real 42d Bybit BTC data (`-$1,837.50` realized PnL, `3.67%` max drawdown). The safer profile preserves the `60000` to `90000` BTC operating range but reduces the resting map to 34 total levels so spacing is roughly `$882` per level inside the range while TP remains twice SL.
-- Active population cap: `6` open/pending positions total, `3` per side
+- Balanced grid map: `86` levels total (`43` buy levels below mid, `43` sell levels above mid)
+- Grid / TP / SL spacing target: `350 / 525 / 350` with a 1.5:1 TP-to-SL ratio
+- Backtest note: after the sparse `900 / 1800 / 900` safety pass, a real Bybit BTC+ETH sweep over `2026-04-07 01:00 UTC` to `2026-05-18 16:00 UTC` tested BTC-only and BTC+ETH portfolios with denser grids. No fixed-lot case reached a 20% monthly PnL target while honoring the Atlas 50k `0.05` BTC lot constraint and staying under the monthly drawdown guard. The best balanced fixed-lot BTC-only profile was `350 / 525 / 350`, which produced `+$916.50` realized PnL over 41.67 days (`~1.32%` monthly run-rate), `0.322%` max drawdown, `459` opened orders, and `46.29%` TP win rate. A denser `175 / 350 / 175` profile opened more orders (`1476`) but had lower win rate and higher drawdown, so `350 / 525 / 350` is the balanced deployment tune. ETH was tested as an edge add-on and reduced the combined result during this sample; keep this 50k profile BTC-only unless a later ETH-specific sweep proves positive contribution.
+- Active population cap: `20` open/pending positions total, `10` per side
 - BTC lots: `0.05` per level
 
 This note is intentionally scoped to the **new login account** deployment.
