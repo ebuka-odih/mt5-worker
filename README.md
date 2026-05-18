@@ -177,7 +177,7 @@ venv\Scripts\python windows_mt5_worker.py
 
 For this Atlas 5k rollout, restart only the **new** 5k worker/service after `git pull`. Leave the old login worker/service untouched.
 
-If you run the worker via NSSM or Task Scheduler, restart only that Atlas 5k task/service after `git pull`.
+If the old login already runs under NSSM or Task Scheduler, create a **separate** service/task name for the new login worker (for example `MT5WorkerAtlas5K`) instead of reusing the old one. After `git pull`, restart only that Atlas 5k service/task and leave the old login service running unchanged.
 
 ### Running in Background
 

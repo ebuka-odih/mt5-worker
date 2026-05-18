@@ -149,7 +149,8 @@ These endpoints are the fastest way to verify whether the bot is actually behavi
 - Do **not** edit the old Windows worker `.env` in place for this rollout. Copy `mt5-worker/.env.atlas-5k.example` into a dedicated `.env` for the new login and launch that worker separately.
 - The new 5k login should use only the `atlas-5k` profile files, port `8782`, magic `552701`, and worker ID `windows-mt5-atlas-5k-01`.
 - The VPS now stages dense local grid levels in alternating buy/sell order so the 5k runtime fills its capped exposure closer to market instead of exhausting side-skew limits on one side first.
-- If the Windows box runs the worker as NSSM or Task Scheduler, restart only the new Atlas 5k worker after updating `.env`.
+- If the Windows box runs the worker as NSSM or Task Scheduler, create a dedicated service/task name for the new login (for example `MT5WorkerAtlas5K`) and restart only that new Atlas 5k worker after updating `.env`.
+- Leave the old login's Windows service/task and `.env` file exactly as they are; this rollout is only for the new login account.
 - Use the dedicated compose project name `atlas-5k` so compose does not try to replace the original `forex-brain` stack.
 
 ## Latest pushed runtime note for local AI
