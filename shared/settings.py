@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -142,7 +143,22 @@ class Settings(BaseModel):
     mt5_worker: Mt5WorkerSettings = Field(default_factory=Mt5WorkerSettings)
 
 
+def _apply_env_overrides(raw: dict[str, Any]) -> dict[str, Any]:
+    """Apply runtime-only secret/config overrides.
+
+    Profile YAML files are committed and intentionally keep worker tokens as
+    placeholders. Live deployments can inject API_WORKER_TOKEN (preferred) or
+    WORKER_TOKEN through docker/Windows env files without committing secrets.
+    """
+    worker_token = os.getenv("API_WORKER_TOKEN") or os.getenv("WORKER_TOKEN")
+    if worker_token:
+        api = raw.setdefault("api", {})
+        api["worker_token"] = worker_token
+    return raw
+
+
 def load_settings(path: str | Path = "config/settings.yaml") -> Settings:
     path = Path(path)
     raw: dict[str, Any] = yaml.safe_load(path.read_text()) if path.exists() else {}
+    raw = _apply_env_overrides(raw or {})
     return Settings.model_validate(raw)

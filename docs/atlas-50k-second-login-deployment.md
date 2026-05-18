@@ -16,7 +16,14 @@ Dedicated runtime identity:
 - API port: `8783`
 - MT5 magic: `552650`
 - Comment prefix: `vps_forex_brain_atlas50k`
-- Worker token placeholder: `CHANGE_ME_ATLAS_50K_INSTANT_WORKER_TOKEN`
+- Worker token placeholder in committed YAML: `CHANGE_ME_ATLAS_50K_INSTANT_WORKER_TOKEN`
+- Live VPS token source: ignored runtime env file `.env.atlas-50k-instant` loaded by `docker-compose.atlas-50k-instant.yml`
+
+The committed YAML keeps a placeholder so secrets do not enter git. The live 50k container must receive the real token through `.env.atlas-50k-instant`:
+
+```env
+API_WORKER_TOKEN=<same token used by the Windows .env.atlas-50k WORKER_TOKEN>
+```
 
 This new login must run as its own isolated instance so it cannot interfere with the old account's risk state, cooldowns, or worker routing.
 
