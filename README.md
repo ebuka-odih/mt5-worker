@@ -152,9 +152,9 @@ venv\Scripts\python windows_mt5_worker.py
 You should see:
 ```
 [INFO] mt5-worker: Starting Windows MT5 worker
-[INFO] mt5-worker:   VPS API:   https://<fresh-cloudflare-tunnel>.trycloudflare.com
+[INFO] mt5-worker:   VPS API:   https://<fresh-atlas-5k-tunnel>.trycloudflare.com
 [INFO] mt5-worker:   Dry Run:   True
-[INFO] mt5-worker: MT5 connected: login=XXXXX, server=AtlasFunded, balance=400000.0
+[INFO] mt5-worker: MT5 connected: login=XXXXX, server=AtlasFunded, balance=5000.0
 ```
 
 **5. Go live (only after dry-run looks good):**
@@ -212,18 +212,20 @@ schtasks /create /tn "MT5 Worker" /tr "C:\forex-mt5-bot\mt5-worker\venv\Scripts\
 | `MT5_MAGIC` | No | Magic number for orders | `552501` |
 | `POLL_SECONDS` | No | Signal poll interval | `1` |
 
-## Risk Parameters (Atlas Funded)
+## Risk Parameters (Atlas 5k isolated login)
 
-Configured in `config/settings.yaml`:
+Configured in `config/settings.atlas-5k.yaml`:
 
-- **Starting balance:** $400,000
-- **Max drawdown:** 4% ($16,000)
-- **Daily loss budget:** $4,000 (1%)
-- **Risk per order:** $1,750
+- **Starting balance:** $5,000
+- **Internal max daily loss cap:** 2% ($100)
+- **Daily loss budget:** $75
+- **Risk per order:** $7.5
 - **Leverage:** 10x max
-- **Grid:** 500 levels each side
-- **TP/SL:** 1000/500 pips (1:2 R:R)
-- **Symbols:** BTCUSD, ETHUSD
+- **Grid:** 600 spacing / 1200 TP / 600 SL
+- **Levels:** 5 each side
+- **Trend guard:** 2.0%
+- **Symbols:** BTCUSD only
+- **Loss policy:** `auto_close_loss_pct: 0.0` to preserve recovery-first behavior while underwater
 
 ## Grid-Strike Strategy
 
@@ -242,18 +244,18 @@ For deployment and pre-live checks, use `docs/DEPLOYMENT_CHECKLIST.md`.
 
 ### Worker can't connect to VPS
 ```cmd
-curl https://<fresh-cloudflare-tunnel>.trycloudflare.com/health
+curl https://<fresh-atlas-5k-tunnel>.trycloudflare.com/health
 ```
-If tunnel is stale, regenerate on VPS: `cloudflared tunnel --url http://localhost:8780`
+If the 5k tunnel is stale, regenerate it on the VPS against the isolated port: `cloudflared tunnel --url http://localhost:8782`
 
 ### MT5 not connecting
-- Ensure MT5 is open and logged into Atlas funded account
-- Check account balance is $400k
-- Verify symbols (BTCUSD, ETHUSD) are available
+- Ensure MT5 is open and logged into the **new Atlas 5k account**
+- Check account balance is around $5k for this isolated login
+- Verify `BTCUSD` is available in Market Watch
 
 ### No signals coming through
-- Check VPS brain is running on port 8780
-- Verify `WORKER_TOKEN` matches in both `.env` files
+- Check the isolated 5k VPS brain is running on port `8782`
+- Verify `WORKER_TOKEN` matches between `config/settings.atlas-5k.yaml` on the VPS and the Windows worker `.env`
 - Check `worker.log` for errors
 
 ### Token mismatch

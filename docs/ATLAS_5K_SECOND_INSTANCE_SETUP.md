@@ -42,6 +42,24 @@ This profile runs **alongside** the existing MT5 brain without touching the old 
 - `BTCUSD lots: 0.01` *(0.005 was rejected live by MT5 as invalid volume; 0.01 is the accepted floor)*
 - `auto_close_loss_pct: 0.0` keeps the user's recovery-first loss policy intact for live trading
 
+## Latest focused backtest snapshot (2026-05-18)
+
+Using the current isolated 5k BTC-only shape on 1000 hourly BTCUSD bars (~41.7 days) from Bybit:
+
+- Candidate: `grid=600 / TP=1200 / SL=600 / trend_guard=2.0 / max_new_orders_per_bar=1 / fixed lot=0.01`
+- Realized PnL: `$94.95`
+- Normalized monthly return: `1.37%`
+- Max drawdown: `0.49%`
+- Worst intraday equity loss: `0.37%`
+- Orders opened: `87`
+- Max margin used: `4.74%`
+- Stop event: `none`
+
+Important interpretation:
+
+- Because the current live profile forces `BTCUSD` to `0.01` lots, the backtest shows `risk_per_order: 7.5` and `risk_per_order: 10.0` behaving the same at this stop distance; both quantize to the same minimum lot.
+- A more aggressive `max_new_orders_per_bar: 3` variant improved normalized return to about `1.78%/month`, but the deployed recommendation stays at `1` new order per bar because this rollout is for the **new 5k login** and is intentionally slower/safer while keeping the old login untouched.
+
 This is the safer profile for the **new** 5k login. The old login continues on its separate runtime unchanged.
 
 ## VPS launch
