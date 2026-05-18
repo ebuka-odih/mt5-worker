@@ -71,9 +71,11 @@ Verify both runtimes independently:
 - Total drawdown cap: `5%`
 - Internal daily loss budget: `$600`
 - Risk per order budget: `$125`
-- Grid: `900 / 1800 / 900`
-- Levels each side: `3`
-- BTC lots: `0.12`
+- Grid range: `60000` lower to `90000` upper
+- Sparse grid map: `100` levels total (`50` buy levels below mid, `50` sell levels above mid)
+- Grid / TP / SL spacing: `300 / 300 / 300`
+- Active population cap: `10` open/pending positions total, `5` per side
+- BTC lots: `0.05` per level
 
 This note is intentionally scoped to the **new login account** deployment.
 It does not replace or modify the old account setup.
