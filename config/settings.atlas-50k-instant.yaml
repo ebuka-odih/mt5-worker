@@ -1,0 +1,100 @@
+app:
+  name: forex-mt5-bot-atlas-50k-instant
+  mode: live
+  timezone: UTC
+
+api:
+  host: 127.0.0.1
+  port: 8783
+  worker_token: CHANGE_ME_ATLAS_50K_INSTANT_WORKER_TOKEN
+
+market_data:
+  provider: bybit
+  refresh_seconds: 60
+  candles_interval: 1h
+  candles_period: 30d
+  symbols:
+    - BTCUSD
+
+risk:
+  account_currency: USD
+  starting_balance: 50000
+  max_risk_per_trade_pct: 0.30
+  max_daily_loss_pct: 3.0
+  max_total_drawdown_pct: 5.0
+  funded_challenge_mode: true
+  challenge_min_days: 5
+  challenge_max_days: 999
+  max_open_positions: 6
+  max_positions_per_symbol: 6
+  max_same_side_positions: 3
+  max_directional_skew: 3
+  default_stop_loss_pips: 900
+  default_take_profit_pips: 1800
+  min_rr: 2.0
+  risk_per_order: 125.0
+  daily_loss_budget: 600.0
+  leverage: 10.0
+  max_margin_usage_pct: 20.0
+
+strategy:
+  enabled: true
+  min_signal_confidence: 0.70
+  trend_fast_ema: 20
+  trend_slow_ema: 50
+  rsi_period: 14
+  rsi_buy_below: 35
+  rsi_sell_above: 65
+  trend_guard_bars: 6
+  trend_guard_pct: 2.0
+  max_new_orders_per_bar: 1
+
+grid_strike:
+  enabled: true
+  min_score: 0.60
+  min_range_pct: 1.00
+  max_range_pct: 18.00
+  max_trend_ratio: 0.65
+  lookback_candles: 720
+  levels_each_side: 3
+  min_spacing_pips: 700.0
+  max_spacing_pips: 1500.0
+  grid_spacing: 900.0
+  take_profit_spacing: 1800.0
+  stop_loss_spacing: 900.0
+  atr_period: 14
+  atr_spacing_multiplier: 1.25
+  session_start_hour_utc: 6
+  session_end_hour_utc: 22
+  max_spread_pips: 0.0
+  order_lots: 0.12
+  symbol_lots:
+    BTCUSD: 0.12
+  symbol_grid_overrides:
+    BTCUSD:
+      levels_each_side: 3
+      lower_bound: 85000.0
+      upper_bound: 125000.0
+
+basket_profit_lock:
+  enabled: true
+  trail_pct: 25.0
+  activation_threshold: 500.0
+  cooldown_hours: 4
+
+mt5_worker:
+  poll_seconds: 1
+  heartbeat_seconds: 10
+  allowed_order_types:
+    - market
+    - limit
+  magic_number: 552650
+  comment_prefix: vps_forex_brain_atlas50k
+  auto_close_enabled: true
+  auto_close_profit_pct: 1.0
+  auto_close_loss_pct: 0.0
+  basket_take_profit_usd: 500.0
+  stale_position_minutes: 0
+  volatility_spike_close_pct: 3.0
+  reentry_cooldown_seconds: 900
+  auto_reopen_after_close: true

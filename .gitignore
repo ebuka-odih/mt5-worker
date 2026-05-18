@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 !mt5-worker/.env.atlas-5k.example
+!mt5-worker/.env.atlas-50k.example
 venv/
 __pycache__/
 *.py[cod]
