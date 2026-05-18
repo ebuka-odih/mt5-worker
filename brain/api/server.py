@@ -72,6 +72,7 @@ class CreateSignalRequest(BaseModel):
     symbol: str
     side: str = "buy"
     action: str = "open"
+    order_type: str = "market"
     lots: Optional[float] = None
     position_ticket: Optional[int] = None
     order_ticket: Optional[int] = None
@@ -79,6 +80,8 @@ class CreateSignalRequest(BaseModel):
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     target_worker_id: Optional[str] = None
+    grid_id: Optional[str] = None
+    grid_index: Optional[int] = None
 
 
 class BybitWebhookPayload(BaseModel):
@@ -801,6 +804,7 @@ def create_signal_from_grid(req: CreateSignalRequest = Body(...)) -> Signal:
     signal = Signal(
         symbol=symbol_key,
         side=SignalSide(req.side.lower()),
+        order_type=req.order_type,
         action=SignalAction(req.action.lower()),
         lots=lots,
         position_ticket=req.position_ticket,
@@ -811,6 +815,8 @@ def create_signal_from_grid(req: CreateSignalRequest = Body(...)) -> Signal:
         confidence=0.95,
         reason="manual-create",
         target_worker_id=req.target_worker_id,
+        grid_id=req.grid_id,
+        grid_index=req.grid_index,
     )
     with STATE_LOCK:
         guard = _entry_guard_locked(signal)
