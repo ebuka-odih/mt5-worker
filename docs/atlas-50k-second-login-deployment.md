@@ -70,10 +70,10 @@ Verify both runtimes independently:
 - new 50k runtime responds on `http://127.0.0.1:8783/health`
 - if the old runtime is down, recover it separately first instead of replacing it with the new login stack
 
-## 50k BTC-only balanced-grid profile shipped in this repo
+## 50k accepted BTC+ETH balanced-grid profile shipped in this repo
 
 - Balance: `50000`
-- Symbols: `BTCUSD` only
+- Symbols: `BTCUSD`, `ETHUSD`
 - Daily loss cap: `3%`
 - Total drawdown cap: `5%`
 - Internal daily loss budget: `$600`
@@ -81,9 +81,11 @@ Verify both runtimes independently:
 - Grid range: `60000` lower to `90000` upper
 - Balanced grid map: `86` levels total (`43` buy levels below mid, `43` sell levels above mid)
 - Grid / TP / SL spacing target: `350 / 525 / 350` with a 1.5:1 TP-to-SL ratio
-- Backtest note: after the sparse `900 / 1800 / 900` safety pass, a real Bybit BTC+ETH sweep over `2026-04-07 01:00 UTC` to `2026-05-18 16:00 UTC` tested BTC-only and BTC+ETH portfolios with denser grids. No fixed-lot case reached a 20% monthly PnL target while honoring the Atlas 50k `0.05` BTC lot constraint and staying under the monthly drawdown guard. The best balanced fixed-lot BTC-only profile was `350 / 525 / 350`, which produced `+$916.50` realized PnL over 41.67 days (`~1.32%` monthly run-rate), `0.322%` max drawdown, `459` opened orders, and `46.29%` TP win rate. A denser `175 / 350 / 175` profile opened more orders (`1476`) but had lower win rate and higher drawdown, so `350 / 525 / 350` is the balanced deployment tune. ETH was tested as an edge add-on and reduced the combined result during this sample; keep this 50k profile BTC-only unless a later ETH-specific sweep proves positive contribution.
+- Deployment note: this profile accepts both `BTCUSD` and `ETHUSD` for the new 50k login. BTC keeps the balanced fixed-lot deployment tune (`350 / 525 / 350` with `0.05` lots). ETH is enabled as the paired accepted symbol with its own grid override and `0.50` lots while the shared account caps still limit total open/pending exposure.
 - Active population cap: `20` open/pending positions total, `10` per side
 - BTC lots: `0.05` per level
+- ETH range: `1000` lower to `5000` upper, `40` buy levels and `40` sell levels
+- ETH lots: `0.50` per level
 
 This note is intentionally scoped to the **new login account** deployment.
 It does not replace or modify the old account setup.

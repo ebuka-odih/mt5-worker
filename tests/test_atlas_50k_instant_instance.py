@@ -16,7 +16,7 @@ def test_atlas_50k_instant_settings_profile_loads_expected_rules() -> None:
 
     assert settings.app.name == "forex-mt5-bot-atlas-50k-instant"
     assert settings.api.port == 8783
-    assert settings.market_data.symbols == ["BTCUSD"]
+    assert settings.market_data.symbols == ["BTCUSD", "ETHUSD"]
     assert settings.risk.starting_balance == 50_000
     assert settings.risk.max_daily_loss_pct == 3.0
     assert settings.risk.max_total_drawdown_pct == 5.0
@@ -34,10 +34,15 @@ def test_atlas_50k_instant_settings_profile_loads_expected_rules() -> None:
     assert settings.grid_strike.take_profit_spacing == 525.0
     assert settings.grid_strike.stop_loss_spacing == 350.0
     assert settings.grid_strike.symbol_lots["BTCUSD"] == 0.05
+    assert settings.grid_strike.symbol_lots["ETHUSD"] == 0.50
     btc_override = settings.grid_strike.symbol_grid_overrides["BTCUSD"]
     assert btc_override["levels_each_side"] == 43
     assert btc_override["lower_bound"] == 60000.0
     assert btc_override["upper_bound"] == 90000.0
+    eth_override = settings.grid_strike.symbol_grid_overrides["ETHUSD"]
+    assert eth_override["levels_each_side"] == 40
+    assert eth_override["lower_bound"] == 1000.0
+    assert eth_override["upper_bound"] == 5000.0
     assert settings.mt5_worker.magic_number == 552650
     assert settings.mt5_worker.comment_prefix == "vps_forex_brain_atlas50k"
     assert settings.api.worker_token != "CHANGE_ME_LONG_RANDOM_TOKEN"
@@ -71,6 +76,31 @@ def test_atlas_50k_btc_grid_plan_uses_balanced_dense_range_and_safe_lots() -> No
     assert plan.sell_levels[0].price == 75348.84
     assert 348.0 <= plan.grid_spacing_pips <= 349.0
     assert settings.grid_strike.take_profit_spacing > settings.grid_strike.stop_loss_spacing
+
+
+def test_atlas_50k_eth_grid_plan_uses_accepted_btc_eth_profile() -> None:
+    settings = load_settings(PROJECT_ROOT / "config/settings.atlas-50k-instant.yaml")
+    candidate = GridStrikeCandidate(
+        symbol="ETHUSD",
+        score=0.9,
+        tradeable=True,
+        market_regime="range",
+        mid_price=3000.0,
+        range_pct=10.0,
+        trend_ratio=0.1,
+        atr_pips=500.0,
+        spread_pips=0.0,
+        grid_spacing_pips=350.0,
+        reason="test",
+    )
+
+    plan = build_grid_plan(candidate, mid_price=3000.0, settings=settings.grid_strike)
+
+    assert plan.lots_per_level == 0.50
+    assert len(plan.buy_levels) == 40
+    assert len(plan.sell_levels) == 40
+    assert plan.lower_bound == 1000.0
+    assert plan.upper_bound == 5000.0
 
 
 def test_atlas_50k_windows_deployment_note_mentions_new_login_and_old_runtime_safety() -> None:
