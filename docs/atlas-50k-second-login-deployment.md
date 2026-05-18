@@ -43,14 +43,15 @@ Then start the **new** worker from the dedicated env.
 Do **not** overwrite the old worker `.env` and do not restart the old worker in place.
 The goal is: keep the old worker/service running unchanged while launching a second worker for the new login account.
 
-Example launch pattern:
+Example launch pattern using the same worker code with the new 50k config file:
 
 ```powershell
 cd C:\forex-mt5-bot\mt5-worker
-Copy-Item .env.atlas-50k .env
 venv\Scripts\activate
-python windows_mt5_worker.py
+python windows_mt5_worker.py --env-file .env.atlas-50k
 ```
+
+Do not copy `.env.atlas-50k` over `.env` unless this Windows checkout is dedicated to the new 50k login only.
 
 If the old worker is already running as a service or in another terminal session, leave it alone.
 Start this new login worker separately.

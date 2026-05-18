@@ -42,6 +42,7 @@ def test_atlas_50k_windows_deployment_note_mentions_new_login_and_old_runtime_sa
     assert "settings.atlas-50k-instant.yaml" in note
     assert "docker-compose.atlas-50k-instant.yml" in note
     assert ".env.atlas-50k.example" in note
+    assert "--env-file .env.atlas-50k" in note
     assert "8783" in note
     assert "do not overwrite the old worker .env" in note.lower()
 

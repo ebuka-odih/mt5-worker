@@ -47,7 +47,22 @@ try:
 except ImportError:  # allows the file to be linted on non-Windows machines
     mt5 = None
 
-load_dotenv()
+def _env_file_from_args(argv: list[str]) -> str:
+    """Return the worker env file path from CLI/env, defaulting to .env.
+
+    This lets the same Windows worker script run multiple Atlas logins safely:
+    python windows_mt5_worker.py --env-file .env.atlas-50k
+    """
+    for index, arg in enumerate(argv[1:], start=1):
+        if arg == "--env-file" and index + 1 < len(argv):
+            return argv[index + 1]
+        if arg.startswith("--env-file="):
+            return arg.split("=", 1)[1]
+    return os.getenv("WORKER_ENV_FILE", ".env")
+
+
+ENV_FILE = _env_file_from_args(sys.argv)
+load_dotenv(ENV_FILE)
 
 API_BASE = os.getenv("VPS_API_BASE", "http://127.0.0.1:8780").rstrip("/")
 TOKEN = os.getenv("WORKER_TOKEN", "")
@@ -59,7 +74,7 @@ MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 RETRY_DELAY = float(os.getenv("RETRY_DELAY", "2"))
 
 if not TOKEN:
-    logger.error("WORKER_TOKEN is not set in .env file. Please set a strong random token.")
+    logger.error(f"WORKER_TOKEN is not set in {ENV_FILE}. Please set a strong random token.")
     sys.exit(1)
 
 HEADERS = {"X-Worker-Token": TOKEN}
@@ -536,6 +551,7 @@ def main() -> None:
     global _mt5_state, _shutdown_requested
 
     logger.info(f"Starting Windows MT5 worker")
+    logger.info(f"  Env File:  {ENV_FILE}")
     logger.info(f"  Worker ID: {WORKER_ID}")
     logger.info(f"  VPS API:   {API_BASE}")
     logger.info(f"  Dry Run:   {DRY_RUN}")

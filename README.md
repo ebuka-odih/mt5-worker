@@ -91,6 +91,33 @@ On the VPS, launch the second instance with its own compose project name so the 
 docker compose -p atlas-5k -f docker-compose.atlas-5k.yml up -d --build
 ```
 
+### Atlas 50k new login / shared worker code with separate config
+
+Use the same `mt5-worker/windows_mt5_worker.py` codebase for 5k and 50k, but run it with a dedicated 50k env file so it connects to the 50k VPS brain and MT5 login only:
+
+- VPS config: `config/settings.atlas-50k-instant.yaml`
+- VPS compose: `docker-compose.atlas-50k-instant.yml`
+- Windows template: `mt5-worker/.env.atlas-50k.example`
+- API port: `8783`
+- MT5 magic: `552650`
+- Worker ID: `windows-mt5-atlas-50k-01`
+
+Do **not** replace the old worker `.env`, stop the original port `8780` service, or reuse the 5k `.env`. Full deployment steps are in `docs/atlas-50k-second-login-deployment.md`.
+
+On Windows, after filling `.env.atlas-50k`, start the same worker script with the profile-specific env file:
+
+```powershell
+cd C:\forex-mt5-bot\mt5-worker
+venv\Scripts\activate
+python windows_mt5_worker.py --env-file .env.atlas-50k
+```
+
+On the VPS, launch the 50k brain as its own compose project:
+
+```bash
+docker compose -p atlas-50k -f docker-compose.atlas-50k-instant.yml up -d --build
+```
+
 ### Prerequisites
 
 - Windows 10/11 with Python 3.9+

@@ -14,3 +14,11 @@ def test_worker_env_example_contains_safe_placeholders_without_corruption():
 
     assert "WORKER_TOKEN=CHANGE_ME_TO_A_STRONG_RANDOM_TOKEN" in text
     assert "CHANGE...OKEN" not in text
+
+
+def test_windows_worker_can_load_profile_specific_env_file():
+    text = Path("mt5-worker/windows_mt5_worker.py").read_text()
+
+    assert "--env-file" in text
+    assert "WORKER_ENV_FILE" in text
+    assert "load_dotenv(ENV_FILE)" in text
