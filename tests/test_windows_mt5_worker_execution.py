@@ -150,6 +150,35 @@ def test_execute_signal_places_sell_limit_pending_order(monkeypatch):
     assert reports[0][0][2] == "MT5 pending order placed"
 
 
+def test_execute_signal_clamps_long_grid_comment_for_mt5(monkeypatch):
+    mt5 = FakeMT5(retcode=FakeMT5.TRADE_RETCODE_PLACED)
+    worker = _load_worker_module(monkeypatch, mt5)
+
+    reports = []
+    monkeypatch.setattr(worker, "report", lambda *args, **kwargs: reports.append((args, kwargs)))
+
+    worker.execute_signal(
+        {
+            "id": "grid-buy-long-comment",
+            "symbol": "BTCUSD",
+            "side": "buy",
+            "lots": 0.05,
+            "order_type": "limit",
+            "limit_price": 76000.0,
+            "stop_loss": 75650.0,
+            "take_profit": 76525.0,
+            "grid_id": "atlas50k-btc-eth-accepted-btc",
+            "grid_index": -4,
+        }
+    )
+
+    assert mt5.last_request is not None
+    assert len(mt5.last_request["comment"]) <= worker.MT5_COMMENT_MAX_LEN
+    assert mt5.last_request["comment"].startswith("grid:atl~")
+    assert mt5.last_request["comment"].endswith("accepted-btc:-4")
+    assert reports and reports[0][0][1] == "executing"
+
+
 def test_execute_signal_cancels_pending_order_without_touching_positions(monkeypatch):
     mt5 = FakeMT5(retcode=FakeMT5.TRADE_RETCODE_DONE)
     mt5.orders_get = lambda ticket=None: [SimpleNamespace(ticket=ticket, symbol="EURUSD", volume_current=0.05)]

@@ -29,6 +29,7 @@ def test_atlas_50k_instant_settings_profile_loads_expected_rules() -> None:
     assert settings.risk.default_stop_loss_pips == 350.0
     assert settings.risk.default_take_profit_pips == 525.0
     assert settings.risk.min_rr == 1.5
+    assert settings.strategy.enabled is False
     assert settings.grid_strike.levels_each_side == 43
     assert settings.grid_strike.grid_spacing == 350.0
     assert settings.grid_strike.take_profit_spacing == 525.0

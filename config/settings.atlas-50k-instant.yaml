@@ -39,7 +39,7 @@ risk:
   max_margin_usage_pct: 20.0
 
 strategy:
-  enabled: true
+  enabled: false
   min_signal_confidence: 0.70
   trend_fast_ema: 20
   trend_slow_ema: 50

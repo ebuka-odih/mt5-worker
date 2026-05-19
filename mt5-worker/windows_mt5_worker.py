@@ -217,6 +217,22 @@ def _local_utc_offset_seconds() -> int:
     return int(offset.total_seconds()) if offset is not None else 0
 
 
+MT5_COMMENT_MAX_LEN = 31
+
+
+def _mt5_safe_comment(comment: str) -> str:
+    """Return an MT5-safe order comment.
+
+    The MetaTrader5 Python binding rejects overlong comments before the request
+    reaches the broker with: Invalid "comment" argument. MT5/brokers commonly
+    cap comments at 31 characters, so preserve the useful suffix when clipping.
+    """
+    safe = "".join(ch if 32 <= ord(ch) < 127 else "_" for ch in str(comment))
+    if len(safe) <= MT5_COMMENT_MAX_LEN:
+        return safe
+    return safe[:8] + "~" + safe[-(MT5_COMMENT_MAX_LEN - 9):]
+
+
 def _normalize_opened_at(ts: Any) -> Optional[str]:
     if ts in (None, ""):
         return None
@@ -477,7 +493,7 @@ def execute_signal(signal: dict[str, Any]) -> None:
             "price": price,
             "deviation": 20,
             "magic": MAGIC,
-            "comment": "vps_forex_close",
+            "comment": _mt5_safe_comment("vps_forex_close"),
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
@@ -497,7 +513,7 @@ def execute_signal(signal: dict[str, Any]) -> None:
             "order": int(order_ticket),
             "symbol": symbol,
             "magic": MAGIC,
-            "comment": "vps_forex_cancel",
+            "comment": _mt5_safe_comment("vps_forex_cancel"),
         }
         price = float(getattr(order, "price_open", 0.0) or 0.0)
     else:
@@ -514,6 +530,7 @@ def execute_signal(signal: dict[str, Any]) -> None:
         if grid_id:
             index_suffix = "" if grid_index is None else f":{grid_index}"
             comment = f"grid:{grid_id}{index_suffix}"
+        comment = _mt5_safe_comment(comment)
 
         if requested_order_type == "limit":
             limit_price = signal.get("limit_price")
